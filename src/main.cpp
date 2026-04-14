@@ -68,7 +68,7 @@ bool   controlMenuOpen = false;
 bool   bookConfigOpen = false;
 int    readerContrastBias = 0;  // 0 = Normal, negative = darker, positive = lighter
 String selectedBookmarkFolder = ""; // For hierarchical bookmarks
-epd_mode_t currentEpdMode = epd_mode_t::epd_fast;
+epd_mode_t currentEpdMode = epd_mode_t::epd_text;
 
 // ── Persistence ──────────────────────────────────────────────
 Preferences prefs;
@@ -169,10 +169,10 @@ void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
 
-    currentEpdMode = epd_mode_t::epd_fast;
+    currentEpdMode = epd_mode_t::epd_text;
     M5.Display.setRotation(0);
     M5.Display.setColorDepth(8);
-    M5.Display.setEpdMode(epd_mode_t::epd_fast);
+    M5.Display.setEpdMode(epd_mode_t::epd_text);
     M5.Display.fillScreen(TFT_WHITE);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setFont(&fonts::DejaVu18);
@@ -970,7 +970,7 @@ void handleBookmarksTouch(const m5::touch_detail_t& t) {
             currentEpdMode = epd_mode_t::epd_quality;
         } else {
             selectedBookmarkFolder = "";
-            currentEpdMode = epd_mode_t::epd_fast;
+            currentEpdMode = epd_mode_t::epd_text;
         }
         needRedraw = true;
         return;
@@ -997,7 +997,7 @@ void handleBookmarksTouch(const m5::touch_detail_t& t) {
         for (const auto& folder : uniqueFolders) {
             if (tapY >= yOff && tapY <= yOff + itemH) {
                 selectedBookmarkFolder = folder;
-                currentEpdMode = epd_mode_t::epd_fast;
+                currentEpdMode = epd_mode_t::epd_text;
                 needRedraw = true;
                 return;
             }
@@ -1017,7 +1017,7 @@ void handleBookmarksTouch(const m5::touch_detail_t& t) {
                     for (const auto& b : bookmarks) { if (b.folder == selectedBookmarkFolder) remains = true; }
                     if (!remains) selectedBookmarkFolder = "";
                     
-                    currentEpdMode = epd_mode_t::epd_fast;
+                    currentEpdMode = epd_mode_t::epd_text;
                     needRedraw = true;
                     return;
                 } else {
@@ -1040,7 +1040,7 @@ void handleControlTouch(const m5::touch_detail_t& t) {
     // Swipe up to close
     if (t.distanceY() < -SWIPE_UP_MIN) {
         controlMenuOpen = false;
-        currentEpdMode = epd_mode_t::epd_fast;
+        currentEpdMode = epd_mode_t::epd_quality;
         needRedraw = true;
         return;
     }
@@ -1065,7 +1065,7 @@ void handleControlTouch(const m5::touch_detail_t& t) {
     // Tap outside modal to close
     if (tapX < modX || tapX > modX + modW || tapY < modY || tapY > modY + modH) {
         controlMenuOpen = false;
-        currentEpdMode = epd_mode_t::epd_fast;
+        currentEpdMode = epd_mode_t::epd_quality;
         needRedraw = true;
     }
 }
@@ -1079,7 +1079,7 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
         scanMangaFolders();
         loadProgress(); 
         menuSelected = menuScroll = 0;
-        currentEpdMode = epd_mode_t::epd_fast; 
+        currentEpdMode = epd_mode_t::epd_text; 
         needRedraw = true;
         return;
     }
@@ -1090,13 +1090,13 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
         if (menuScroll + MENU_VISIBLE < totalItems) {
             menuScroll += MENU_VISIBLE;
             menuSelected = menuScroll;
-            currentEpdMode = epd_mode_t::epd_fast;
+            currentEpdMode = epd_mode_t::epd_text;
             needRedraw = true;
         } else {
             // Optional: wrap to top
             menuScroll = 0;
             menuSelected = 0;
-            currentEpdMode = epd_mode_t::epd_fast;
+            currentEpdMode = epd_mode_t::epd_text;
             needRedraw = true;
         }
         return;
@@ -1129,7 +1129,7 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
         if (idx == 0) {
             appState = STATE_BOOKMARKS;
             selectedBookmarkFolder = ""; // Reset to level 1
-            currentEpdMode = epd_mode_t::epd_fast; 
+            currentEpdMode = epd_mode_t::epd_text; 
             needRedraw = true;
         } else {
             // Quality mode is set inside openMangaPath
@@ -1137,7 +1137,7 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
         }
     } else {
         menuSelected = idx;
-        currentEpdMode = epd_mode_t::epd_fast;
+        currentEpdMode = epd_mode_t::epd_text;
         needRedraw = true;
     }
 }
@@ -1194,7 +1194,7 @@ void openMangaPath(const String& path, int page) {
     if (totalPages == 0) {
         drawError("No images found.\nExpected: m5_0000.jpg ...");
         delay(2500);
-        currentEpdMode = epd_mode_t::epd_fast;
+        currentEpdMode = epd_mode_t::epd_text;
         needRedraw = true;
         return;
     }
