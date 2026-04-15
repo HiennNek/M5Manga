@@ -383,7 +383,7 @@ void drawPage() {
 
     gSprite.deleteSprite();
     gSprite.setPsram(true);
-    gSprite.setColorDepth(8);
+    gSprite.setColorDepth(16);
     if (!gSprite.createSprite(DISPLAY_W, DISPLAY_H)) {
         setCpuFrequencyMhz(80);
         drawError("Sprite alloc failed.");
