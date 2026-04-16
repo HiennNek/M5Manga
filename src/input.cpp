@@ -23,7 +23,6 @@ void handleTouch() {
         if (t.wasReleased() && t.base_y > DISPLAY_H - 150 && t.distanceY() < -SWIPE_UP_MIN) {
             bookConfigOpen = true;
             bookConfigPendingPage = currentPage;
-            bookConfigPendingContrastBias = readerContrastBias;
             currentEpdMode = epd_mode_t::epd_fast;
             needRedraw = true;
             return;
@@ -38,6 +37,7 @@ void handleBookmarksTouch(const m5::touch_detail_t& t) {
     if (t.distanceY() < -SWIPE_UP_MIN) {
         if (selectedBookmarkFolder == "") {
             appState = STATE_MENU;
+            menuCacheValid = false;
             currentEpdMode = epd_mode_t::epd_fast;
         } else {
             selectedBookmarkFolder = "";
@@ -138,6 +138,7 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
         scanMangaFolders();
         loadProgress();
         menuSelected = menuScroll = 0;
+        menuCacheValid = false;
         currentEpdMode = epd_mode_t::epd_fast;
         needRedraw = true;
         return;
@@ -148,11 +149,13 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
         if (menuScroll + MENU_VISIBLE < totalItems) {
             menuScroll += MENU_VISIBLE;
             menuSelected = menuScroll;
+            menuCacheValid = false;
             currentEpdMode = epd_mode_t::epd_fast;
             needRedraw = true;
         } else {
             menuScroll = 0;
             menuSelected = 0;
+            menuCacheValid = false;
             currentEpdMode = epd_mode_t::epd_fast;
             needRedraw = true;
         }
@@ -195,7 +198,6 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
 
 void handleReaderTouch(const m5::touch_detail_t& t) {
     if (!t.wasReleased()) return;
-    readerContrastBias = 0;
 
     if (t.x >= LEFT_ZONE_W) {
         if (currentPage < totalPages - 1) {
@@ -227,7 +229,6 @@ void handleBookConfigTouch(const m5::touch_detail_t& t) {
     if (tapX < modX || tapX > modX + modW || tapY < modY || tapY > modY + modH) {
         bookConfigOpen = false;
         currentPage = bookConfigPendingPage;
-        readerContrastBias = bookConfigPendingContrastBias;
         currentEpdMode = epd_mode_t::epd_quality;
         needRedraw = true;
         return;
@@ -253,23 +254,6 @@ void handleBookConfigTouch(const m5::touch_detail_t& t) {
         }
     }
 
-    int conY = modY + 180;
-    if (tapY >= conY && tapY <= conY + 60) {
-        if (tapX < modX + 100) {
-            bookConfigPendingContrastBias -= 20;
-            if (bookConfigPendingContrastBias < -100) bookConfigPendingContrastBias = -100;
-            needRedraw = true;
-        } else if (tapX > modX + modW - 100) {
-            bookConfigPendingContrastBias += 20;
-            if (bookConfigPendingContrastBias > 100) bookConfigPendingContrastBias = 100;
-            needRedraw = true;
-        } else if (tapX > modX + 180 && tapX < modX + modW - 180) {
-            bookConfigPendingContrastBias = 0;
-            needRedraw = true;
-        }
-        if (needRedraw) currentEpdMode = epd_mode_t::epd_fast;
-    }
-
     if (tapX >= modX + 20 && tapX <= modX + modW - 20 && tapY >= modY + 255 && tapY <= modY + 315) {
         int lastSlash = currentMangaPath.lastIndexOf('/');
         String folder = currentMangaPath.substring(lastSlash + 1);
@@ -280,6 +264,7 @@ void handleBookConfigTouch(const m5::touch_detail_t& t) {
     if (tapX >= modX + 20 && tapX <= modX + modW - 20 && tapY >= modY + 325 && tapY <= modY + 385) {
         appState = STATE_MENU;
         bookConfigOpen = false;
+        menuCacheValid = false;
         currentEpdMode = epd_mode_t::epd_fast;
         needRedraw = true;
     }

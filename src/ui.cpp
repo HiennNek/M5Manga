@@ -5,135 +5,146 @@
 #include <SD.h>
 
 void drawMenu() {
+    int totalItems = (int)mangaFolders.size() + 1;
+    int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
+
+    if (!menuCacheValid || lastDrawnMenuScroll != menuScroll) {
+        menuCacheSprite.deleteSprite();
+        menuCacheSprite.setPsram(true);
+        menuCacheSprite.setColorDepth(8);
+        if (menuCacheSprite.createSprite(DISPLAY_W, DISPLAY_H)) {
+            menuCacheSprite.fillScreen(TFT_WHITE);
+            menuCacheSprite.fillRect(0, 0, DISPLAY_W, 80, TFT_BLACK);
+            menuCacheSprite.setFont(&fonts::DejaVu24);
+            menuCacheSprite.setTextColor(TFT_WHITE, TFT_BLACK);
+            menuCacheSprite.setCursor(GRID_GUTTER, 24);
+            menuCacheSprite.print("Library");
+
+            menuCacheSprite.setFont(&fonts::DejaVu12);
+            menuCacheSprite.setCursor(GRID_GUTTER, 54);
+            menuCacheSprite.printf("%d titles available", (int)mangaFolders.size());
+
+            if (lastMangaName.length() > 0) {
+                int barW = DISPLAY_W - (GRID_GUTTER * 2);
+                int barH = 50;
+                int barX = GRID_GUTTER;
+                int barY = DISPLAY_H - 82;
+
+                menuCacheSprite.fillRoundRect(barX, barY, barW, barH, UI_RADIUS, 0x3333);
+                menuCacheSprite.drawRoundRect(barX, barY, barW, barH, UI_RADIUS, TFT_WHITE);
+
+                menuCacheSprite.setTextColor(TFT_WHITE, 0x3333);
+                menuCacheSprite.setFont(&fonts::DejaVu12);
+                menuCacheSprite.setCursor(barX + 10, barY + 10);
+                menuCacheSprite.print("CONTINUE: ");
+
+                menuCacheSprite.setFont(&fonts::DejaVu18);
+                String shortName = lastMangaName;
+                if (shortName.length() > 20) shortName = shortName.substring(0, 18) + "..";
+                menuCacheSprite.print(shortName);
+
+                menuCacheSprite.setFont(&fonts::DejaVu12);
+                menuCacheSprite.setCursor(barX + 10, barY + 30);
+                menuCacheSprite.printf("Page %d", lastPage + 1);
+
+                menuCacheSprite.setCursor(barX + barW - 80, barY + 30);
+                menuCacheSprite.print("RESUME >");
+            }
+
+            if (mangaFolders.empty()) {
+                menuCacheSprite.setFont(&fonts::DejaVu18);
+                menuCacheSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+                menuCacheSprite.setCursor(GRID_GUTTER, 120);
+                menuCacheSprite.println("No manga found in /manga/");
+            } else {
+                for (int i = menuScroll; i < end; i++) {
+                    int relIdx = i - menuScroll;
+                    int row    = relIdx / GRID_COLS;
+                    int col    = relIdx % GRID_COLS;
+
+                    int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
+                    int y = GRID_Y_TOP + row * GRID_ROW_H;
+
+                    menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, 0x8888);
+
+                    if (i == 0) {
+                        menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, 0xEEEE);
+                        menuCacheSprite.setTextColor(TFT_BLACK, 0xEEEE);
+                        menuCacheSprite.setFont(&fonts::DejaVu24);
+                        menuCacheSprite.setCursor(x + 25, y + THUMB_H / 2 - 20);
+                        menuCacheSprite.print("   ★");
+                        menuCacheSprite.setFont(&fonts::DejaVu12);
+                        menuCacheSprite.setCursor(x + 25, y + THUMB_H / 2 + 20);
+                        menuCacheSprite.print("Bookmarks");
+
+                        menuCacheSprite.setFont(&fonts::DejaVu12);
+                        menuCacheSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+                        menuCacheSprite.setCursor(x + THUMB_W / 2 - 35, y + THUMB_H + 10);
+                        menuCacheSprite.print("MY SAVES");
+                    } else {
+                        int fIdx = i - 1;
+                        String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[fIdx], 0);
+                        File coverFile = SD.open(coverPath.c_str());
+                        if (coverFile) {
+                            float imgAspect = 540.0f / 960.0f;
+                            int scaledW = (int)((THUMB_H - 4) * imgAspect);
+                            int xOffset = (THUMB_W - 4 - scaledW) / 2;
+                            if (xOffset < 0) xOffset = 0;
+
+                            menuCacheSprite.drawJpg(&coverFile, x + 2 + xOffset, y + 2, THUMB_W - 4, THUMB_H - 4, 0, 0, 0.0f, 0.0f);
+                            coverFile.close();
+                        } else {
+                            menuCacheSprite.setTextColor(0x8888, TFT_WHITE);
+                            menuCacheSprite.setFont(&fonts::DejaVu12);
+                            menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
+                            menuCacheSprite.print("NO COVER");
+                        }
+
+                        menuCacheSprite.setFont(&fonts::DejaVu12);
+                        menuCacheSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+                        String title = mangaFolders[fIdx];
+                        if (title.length() > 18) title = title.substring(0, 16) + "..";
+                        int textX = x + (THUMB_W - (title.length() * 7)) / 2;
+                        menuCacheSprite.setCursor(std::max(x, textX), y + THUMB_H + 10);
+                        menuCacheSprite.print(title);
+                    }
+                }
+            }
+
+            menuCacheSprite.setFont(&fonts::DejaVu12);
+            menuCacheSprite.setTextColor(0x8888, TFT_WHITE);
+            menuCacheSprite.setCursor(GRID_GUTTER, DISPLAY_H - 24);
+            menuCacheSprite.print("Swipe UP: Refresh  |  Swipe DOWN: Next Page");
+
+            menuCacheValid = true;
+            lastDrawnMenuScroll = menuScroll;
+        }
+    }
+
     gSprite.deleteSprite();
     gSprite.setPsram(true);
     gSprite.setColorDepth(8);
-    if (!gSprite.createSprite(DISPLAY_W, DISPLAY_H)) {
-        M5.Display.fillScreen(TFT_WHITE);
-        M5.Display.display();
-        return;
+    if (!gSprite.createSprite(DISPLAY_W, DISPLAY_H)) return;
+
+    if (menuCacheValid) {
+        menuCacheSprite.pushSprite(&gSprite, 0, 0);
+    } else {
+        gSprite.fillScreen(TFT_WHITE);
     }
-    gSprite.fillScreen(TFT_WHITE);
-
-    gSprite.fillRect(0, 0, DISPLAY_W, 80, TFT_BLACK);
-    gSprite.setFont(&fonts::DejaVu24);
-    gSprite.setTextColor(TFT_WHITE, TFT_BLACK);
-    gSprite.setCursor(GRID_GUTTER, 24);
-    gSprite.print("Library");
-
-    gSprite.setFont(&fonts::DejaVu12);
-    gSprite.setCursor(GRID_GUTTER, 54);
-    gSprite.printf("%d titles available", (int)mangaFolders.size());
-
-    int totalItems = (int)mangaFolders.size() + 1;
-
-    if (lastMangaName.length() > 0) {
-        int barW = DISPLAY_W - (GRID_GUTTER * 2);
-        int barH = 50;
-        int barX = GRID_GUTTER;
-        int barY = DISPLAY_H - 82;
-
-        gSprite.fillRoundRect(barX, barY, barW, barH, UI_RADIUS, 0x3333);
-        gSprite.drawRoundRect(barX, barY, barW, barH, UI_RADIUS, TFT_WHITE);
-
-        gSprite.setTextColor(TFT_WHITE, 0x3333);
-        gSprite.setFont(&fonts::DejaVu12);
-        gSprite.setCursor(barX + 10, barY + 10);
-        gSprite.print("CONTINUE: ");
-
-        gSprite.setFont(&fonts::DejaVu18);
-        String shortName = lastMangaName;
-        if (shortName.length() > 20) shortName = shortName.substring(0, 18) + "..";
-        gSprite.print(shortName);
-
-        gSprite.setFont(&fonts::DejaVu12);
-        gSprite.setCursor(barX + 10, barY + 30);
-        gSprite.printf("Page %d", lastPage + 1);
-
-        gSprite.setCursor(barX + barW - 80, barY + 30);
-        gSprite.print("RESUME >");
-    }
-
-    if (mangaFolders.empty()) {
-        gSprite.setFont(&fonts::DejaVu18);
-        gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
-        gSprite.setCursor(GRID_GUTTER, 120);
-        gSprite.println("No manga found in /manga/");
-        M5.Display.startWrite();
-        gSprite.pushSprite(0, 0);
-        M5.Display.display();
-        M5.Display.endWrite();
-        return;
-    }
-
-    int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
     for (int i = menuScroll; i < end; i++) {
-        int relIdx = i - menuScroll;
-        int row    = relIdx / GRID_COLS;
-        int col    = relIdx % GRID_COLS;
-
-        int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
-        int y = GRID_Y_TOP + row * GRID_ROW_H;
-
         if (i == menuSelected) {
+            int relIdx = i - menuScroll;
+            int row    = relIdx / GRID_COLS;
+            int col    = relIdx % GRID_COLS;
+            int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
+            int y = GRID_Y_TOP + row * GRID_ROW_H;
+
             gSprite.drawRoundRect(x - 5, y - 5, THUMB_W + 10, THUMB_H + 10, UI_RADIUS + 2, TFT_BLACK);
             gSprite.drawRoundRect(x - 4, y - 4, THUMB_W + 8, THUMB_H + 8, UI_RADIUS + 1, TFT_BLACK);
-        }
-
-        gSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, 0x8888);
-
-        if (i == 0) {
-            gSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, 0xEEEE);
-            gSprite.setTextColor(TFT_BLACK, 0xEEEE);
-            gSprite.setFont(&fonts::DejaVu24);
-            gSprite.setCursor(x + 25, y + THUMB_H / 2 - 20);
-            gSprite.print("   ★");
-            gSprite.setFont(&fonts::DejaVu12);
-            gSprite.setCursor(x + 25, y + THUMB_H / 2 + 20);
-            gSprite.print("Bookmarks");
-
-            gSprite.setFont(&fonts::DejaVu12);
-            gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
-            gSprite.setCursor(x + THUMB_W / 2 - 35, y + THUMB_H + 10);
-            gSprite.print("MY SAVES");
-        } else {
-            int fIdx = i - 1;
-            String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[fIdx], 0);
-            File coverFile = SD.open(coverPath.c_str());
-            if (coverFile) {
-                float imgAspect = 540.0f / 960.0f;
-                int scaledW = (int)((THUMB_H - 4) * imgAspect);
-                int xOffset = (THUMB_W - 4 - scaledW) / 2;
-                if (xOffset < 0) xOffset = 0;
-
-                gSprite.drawJpg(&coverFile, x + 2 + xOffset, y + 2, THUMB_W - 4, THUMB_H - 4, 0, 0, 0.0f, 0.0f);
-                coverFile.close();
-            } else {
-                gSprite.setTextColor(0x8888, TFT_WHITE);
-                gSprite.setFont(&fonts::DejaVu12);
-                gSprite.setCursor(x + 10, y + THUMB_H / 2);
-                gSprite.print("NO COVER");
-            }
-
-            gSprite.setFont(&fonts::DejaVu12);
-            gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
-            String title = mangaFolders[fIdx];
-            if (title.length() > 18) title = title.substring(0, 16) + "..";
-            int textX = x + (THUMB_W - (title.length() * 7)) / 2;
-            gSprite.setCursor(std::max(x, textX), y + THUMB_H + 10);
-            gSprite.print(title);
-        }
-
-        if (i == menuSelected) {
             gSprite.fillRect(x + (THUMB_W / 2) - 15, y + THUMB_H + 30, 30, 3, TFT_BLACK);
         }
     }
-
-    gSprite.setFont(&fonts::DejaVu12);
-    gSprite.setTextColor(0x8888, TFT_WHITE);
-    gSprite.setCursor(GRID_GUTTER, DISPLAY_H - 24);
-    gSprite.print("Swipe UP: Refresh  |  Swipe DOWN: Next Page");
 
     M5.Display.startWrite();
     gSprite.pushSprite(0, 0);
@@ -245,23 +256,6 @@ void drawBookConfig() {
     gSprite.print(">");
     gSprite.setCursor(modX + modW - 85, barY + 25);
     gSprite.print(">>");
-
-    int conY = modY + 180;
-    gSprite.drawRoundRect(modX + 20, conY, modW - 40, 60, UI_RADIUS, 0x8888);
-    gSprite.setFont(&fonts::DejaVu18);
-    gSprite.setCursor(modX + 45, conY + 20);
-    gSprite.print("[-]");
-
-    String conText = "Contrast: ";
-    if (bookConfigPendingContrastBias == 0) conText += "Normal";
-    else if (bookConfigPendingContrastBias < 0) conText += "Darker (" + String(abs(bookConfigPendingContrastBias)) + ")";
-    else conText += "Lighter (" + String(bookConfigPendingContrastBias) + ")";
-
-    int conTextW = conText.length() * 10;
-    gSprite.setCursor(modX + (modW - conTextW) / 2, conY + 20);
-    gSprite.print(conText);
-    gSprite.setCursor(modX + modW - 75, conY + 20);
-    gSprite.print("[+]");
 
     int btnX = modX + 20;
     int btnW = modW - 40;
@@ -405,17 +399,6 @@ void drawPage() {
         return;
     }
     pageFile.close();
-
-    if (readerContrastBias != 0) {
-        uint8_t* pix = (uint8_t*)gSprite.getBuffer();
-        if (pix) {
-            int count = DISPLAY_W * DISPLAY_H;
-            for (int i = 0; i < count; i++) {
-                int v = (int)pix[i] + readerContrastBias;
-                pix[i] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
-            }
-        }
-    }
 
     M5.Display.startWrite();
     gSprite.pushSprite(0, 0);

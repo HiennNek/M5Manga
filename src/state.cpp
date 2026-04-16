@@ -13,14 +13,15 @@ int currentPage = 0;
 bool needRedraw = true;
 bool controlMenuOpen = false;
 bool bookConfigOpen = false;
-int readerContrastBias = 0;
 int bookConfigPendingPage = 0;
-int bookConfigPendingContrastBias = 0;
 String selectedBookmarkFolder = "";
 epd_mode_t currentEpdMode = epd_mode_t::epd_fast;
 
 Preferences prefs;
 LGFX_Sprite gSprite(&M5.Display);
+LGFX_Sprite menuCacheSprite(&M5.Display);
+int lastDrawnMenuScroll = -1;
+bool menuCacheValid = false;
 String lastMangaPath = "";
 int lastPage = 0;
 String lastMangaName = "";

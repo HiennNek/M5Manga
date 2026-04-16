@@ -23,15 +23,16 @@ extern int currentPage;
 extern bool needRedraw;
 extern bool controlMenuOpen;
 extern bool bookConfigOpen;
-extern int readerContrastBias;
 extern int bookConfigPendingPage;
-extern int bookConfigPendingContrastBias;
 extern String selectedBookmarkFolder;
 extern epd_mode_t currentEpdMode;
 
 extern Preferences prefs;
 
 extern LGFX_Sprite gSprite;
+extern LGFX_Sprite menuCacheSprite;
+extern int lastDrawnMenuScroll;
+extern bool menuCacheValid;
 extern String lastMangaPath;
 extern int lastPage;
 extern String lastMangaName;
