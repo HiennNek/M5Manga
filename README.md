@@ -1,17 +1,23 @@
 # M5PaperS3 Manga Reader
 
-A JPEG gallery/manga reader for the **M5PaperS3** e-ink device, built with
-**PlatformIO** and the **M5Unified** + **M5GFX** libraries.
+A high-performance JPEG manga reader for the **M5PaperS3** e-ink device, featuring a grid-based library, bookmarking system, and smooth navigation. Built with **PlatformIO** and the **M5Unified** + **M5GFX** libraries.
 
 ---
 
 ## Project Structure
 
 ```
-manga_reader/
-├── platformio.ini
+M5Manga/
+├── platformio.ini      # Build configuration & dependencies
 └── src/
-    └── main.cpp
+    ├── main.cpp        # Entry point & main loop
+    ├── config.h        # Hardware & UI constants
+    ├── state.h/cpp     # Global application state
+    ├── storage.h/cpp   # SD card, file search, & progress saving
+    ├── input.h/cpp     # Touch gesture handling
+    ├── ui.h/cpp        # Rendering logic for menu, reader, & overlays
+    ├── bookmarks.h/cpp # Bookmark management
+    └── navigation.h    # Navigation helpers
 ```
 
 ---
@@ -22,76 +28,85 @@ Format your SD card as **FAT32**. Create the following structure:
 
 ```
 /manga/
-  MyManga1/
-    001.jpg
-    002.jpg
-    003.jpg
+  MySeries1/
+    m5_0000.jpg
+    m5_0001.jpg
     ...
-  AnotherSeries/
-    001.jpg
-    002.jpg
+  AnotherManga/
+    m5_0000.jpg
+    m5_0001.jpg
     ...
 ```
 
-- Only **sub-folders** of `/manga` are recognised as manga titles.
-- Only `.jpg` / `.jpeg` files inside each sub-folder are shown as pages.
-- Files are sorted **alphabetically**, so zero-padding (001, 002 …) is recommended.
-
-> **Tip:** The M5PaperS3 display runs in **portrait mode: 540 × 960 px**.
-> Pre-scale your manga pages to 540 × 960 for a perfect full-screen fit with
-> no letterboxing. A 30 px black status bar is reserved at the top for the
-> page counter, so the usable image area is 540 × 930.
+- **Root folder**: Must be named `/manga`.
+- **Sub-folders**: Each sub-folder is treated as a separate manga title.
+- **Filenames**: Images must follow the pattern `m5_XXXX.jpg` (e.g., `m5_0000.jpg`, `m5_0001.jpg`).
+- **Resolution**: The display is **540 × 960 px** (Portrait). For best performance and full-screen fit, pre-scale your images to these dimensions.
 
 ---
 
 ## Controls
 
-| Gesture | Action |
+### Library Menu
+| Action | Result |
 |---|---|
-| **Tap right half** of screen | Next page |
-| **Tap left half** of screen | Previous page |
-| **Swipe up** (≥ 60 px upward) | Return to manga list menu |
-| **Swipe up** on menu | Refresh folder list |
-| **Swipe down** on menu | Scroll selection up |
-| **Tap a row** on menu | Select / open manga |
+| **Tap Item** | Select / Open manga |
+| **Swipe Up** | Refresh folder list |
+| **Swipe Down** | Scroll to next page of titles |
+| **Tap Bottom Bar** | Quick resume last read manga |
+| **Tap "★ Bookmarks"** | Open bookmarks library |
+
+### Manga Reader
+| Action | Result |
+|---|---|
+| **Tap Right Half** | Next page |
+| **Tap Left Half** | Previous page |
+| **Swipe Down (Top)** | Open **System Menu** (Shutdown, Battery) |
+| **Swipe Up (Bottom)** | Open **Book Menu** (Page jump, Bookmark, Exit) |
+
+### Bookmarks View
+| Action | Result |
+|---|---|
+| **Tap Folder/Page** | Open specific bookmark |
+| **Tap "DEL"** | Delete bookmark |
+| **Swipe Up** | Go back |
 
 ---
 
-## Dependencies
+## Features
 
-| Library | Version |
-|---|---|
-| `m5stack/M5Unified` | ≥ 0.2.5 (tested 0.2.13) |
-| `m5stack/M5GFX` | ≥ 0.2.7 |
+- **Full-Screen Reading**: Optimized 540x960 rendering with no UI overlays during reading.
+- **Smart Resume**: Remembers your last read manga and page automatically.
+- **Binary Search Loading**: Quickly indexes thousands of pages in seconds.
+- **Battery Management**: Real-time battery level in System Menu.
+- **Performance**: Uses `epd_quality` for crisp manga pages and `epd_fast` for responsive UI menus.
+- **Power Efficiency**: Dynamic CPU frequency scaling (80MHz idle / 240MHz loading).
 
-Both are declared in `platformio.ini` and fetched automatically.
+---
+
+## Technical Requirements
+
+- **Hardware**: M5PaperS3 (ESP32-S3).
+- **PSRAM**: Mandatory (configured in `platformio.ini`).
+- **Libraries**:
+    - `m5stack/M5Unified` (tested 0.2.13)
+    - `m5stack/M5GFX` (tested 0.2.7)
 
 ---
 
 ## Building & Flashing
 
-1. Install [PlatformIO IDE](https://platformio.org/) (VS Code extension) or
-   use the CLI.
-2. Open the `manga_reader/` folder as a PlatformIO project.
-3. **Enter download mode** on the M5PaperS3: long-press the power button until
-   the back LED blinks red.
-4. Connect via USB-C and run:
-
+1. Install [PlatformIO IDE](https://platformio.org/) (VS Code extension).
+2. Open the project folder.
+3. **Enter Download Mode**: Long-press the power button until the back LED blinks red.
+4. Click **Upload** in VS Code or run:
 ```bash
 pio run --target upload
 ```
-
-or click **Upload** in VS Code.
 
 ---
 
 ## Notes
 
-- **PSRAM** is mandatory. The `platformio.ini` sets `qio_opi` memory mode and
-  `BOARD_HAS_PSRAM`, matching the M5PaperS3 hardware requirement.
-- `drawJpgFile` decodes JPEG in PSRAM, so large images are handled without
-  running out of heap.
-- The e-ink display uses `epd_quality` mode for page images (crisp, slower
-  refresh) and `epd_fast` / `epd_text` mode for the UI overlays.
-- If your images are taller than wide (portrait manga pages), set the manga
-  images to 540 × 960 and rotate the display to `setRotation(0)` in `main.cpp`.
+- If your images are not showing, verify the `m5_` prefix and 4-digit zero-padding.
+- The reader uses 16-bit color depth sprites in PSRAM for JPEG decoding to ensure high-quality grayscale rendering on the e-ink panel.
