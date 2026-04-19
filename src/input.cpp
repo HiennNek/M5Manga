@@ -265,16 +265,7 @@ void handleMenuTouch(const m5::touch_detail_t& t) {
     int dx = t.distanceX();
     int totalItems = (int)mangaFolders.size() + 2;
 
-    if (dy < -SWIPE_UP_MIN) {
-        scanMangaFolders();
-        loadProgress();
-        menuSelected = menuScroll = 0;
-        menuCacheValid = false;
-        currentEpdMode = epd_mode_t::epd_fast;
-        needRedraw = true;
-        return;
-    }
-
+    // Horizontal Swipe Right or Vertical Swipe Down for Next Page
     if (dx > 60 || dy > SWIPE_UP_MIN) {
         if (menuScroll + MENU_VISIBLE < totalItems) {
             menuScroll += MENU_VISIBLE;
