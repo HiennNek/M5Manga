@@ -97,11 +97,11 @@ Format your SD card as **FAT32**. Create the following structure:
 ## Features
 
 - **Ultra-Fast Rendering**: Uses `M5GFX` sprites for direct display buffer writing and partial e-ink updates.
-- **Hardware Decoding**: Utilizes `JPEGDEC` to directly stream and map 8-bit grayscale pixels.
+- **Built-in JPEG Decoding**: Utilizes `M5GFX`'s built-in JPG renderer to efficiently decode images to the display buffer.
 - **Advanced Display Controls**: Toggle between multiple dithering modes (Floyd-Steinberg, Atkinson, Ordered) and contrast presets for optimal image clarity on the e-ink screen.
 - **Modern High-Contrast UI**: Beautiful, commercial-grade aesthetic with 8px rounded corners, dynamic touch feedback, and 4px drop-shadow modals.
-- **WiFi File Server**: Built-in async web server allows you to upload, delete, and organize manga zip/folders from any browser without removing the SD card.
-- **Persistent Bookmarks**: JSON-backed bookmarking system (`ArduinoJson`) to save and resume reading positions seamlessly.
+- **WiFi File Server**: Built-in web server (`WebServer.h`) allows you to upload, delete, and organize manga folders from any browser without removing the SD card.
+- **Persistent Bookmarks**: CSV-backed bookmarking system to save and resume reading positions seamlessly.
 - **Smart Resume**: "Continue Reading" pill bar remembers your exact location across reboots.
 
 ---
@@ -112,10 +112,7 @@ Format your SD card as **FAT32**. Create the following structure:
 - **PSRAM**: Mandatory (configured in `platformio.ini`).
 - **Libraries**:
     - `m5stack/M5Unified` (Power & Touch management)
-    - `m5stack/M5GFX` (Display rendering)
-    - `bitbank2/JPEGDEC` (Image decoding)
-    - `bblanchon/ArduinoJson` (Settings & bookmarks storage)
-    - `ESPAsyncWebServer` & `AsyncTCP` (WiFi file management)
+    - `m5stack/M5GFX` (Display rendering & Image decoding)
 
 ---
 
@@ -123,7 +120,7 @@ Format your SD card as **FAT32**. Create the following structure:
 
 1. Install [PlatformIO IDE](https://platformio.org/) (VS Code extension).
 2. Open the project folder.
-3. **Enter Download Mode**: Long-press the power button until the back LED blinks red.
+3. **Enter Download Mode**: Long-press the power button until the back LED turns green.
 4. Click **Upload** in VS Code or run:
 ```bash
 pio run --target upload
