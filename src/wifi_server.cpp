@@ -1,7 +1,7 @@
 #include "wifi_server.h"
-#include <WiFi.h>
-#include <WebServer.h>
 #include <SD.h>
+#include <WebServer.h>
+#include <WiFi.h>
 #include <vector>
 
 static WebServer server(80);
@@ -227,171 +227,215 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-static void handleRoot() {
-    server.send_P(200, "text/html", INDEX_HTML);
+static void handleRoot() { server.send_P(200, "text/html", INDEX_HTML); }
+
+static void handleList()
+{
+  String path = server.arg("dir");
+  if (path == "")
+    path = "/";
+
+  File root = SD.open(path);
+  if (!root || !root.isDirectory())
+  {
+    server.send(404, "text/plain", "Not Found");
+    return;
+  }
+
+  String output = "[";
+  output.reserve(1024); // Start with a reasonable size
+  File file = root.openNextFile();
+  while (file)
+  {
+    if (output.length() > 1)
+      output += ",";
+    output += "{\"name\":\"";
+    output += file.name();
+    output += "\",\"type\":\"";
+    output += (file.isDirectory() ? "dir" : "file");
+    output += "\",\"size\":";
+    output += String(file.size());
+    output += "}";
+
+    file = root.openNextFile();
+  }
+  output += "]";
+  server.send(200, "application/json", output);
 }
 
-static void handleList() {
-    String path = server.arg("dir");
-    if (path == "") path = "/";
-    
-    File root = SD.open(path);
-    if (!root || !root.isDirectory()) {
-        server.send(404, "text/plain", "Not Found");
-        return;
+static void handleDelete()
+{
+  if (server.hasArg("plain") == false)
+  {
+    server.send(400, "text/plain", "Body not received");
+    return;
+  }
+  String body = server.arg("plain");
+  // Simple JSON parse for {"paths":["/path1", "/path2"]}
+  int start = body.indexOf("[");
+  int end = body.lastIndexOf("]");
+  if (start == -1 || end == -1)
+  {
+    server.send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+  String pathsStr = body.substring(start + 1, end);
+
+  while (pathsStr.length() > 0)
+  {
+    int nextQuote = pathsStr.indexOf("\"");
+    if (nextQuote == -1)
+      break;
+    pathsStr = pathsStr.substring(nextQuote + 1);
+    int endQuote = pathsStr.indexOf("\"");
+    if (endQuote == -1)
+      break;
+    String path = pathsStr.substring(0, endQuote);
+
+    Serial.printf("Deleting: %s\n", path.c_str());
+    if (SD.exists(path))
+    {
+      File f = SD.open(path);
+      if (f.isDirectory())
+      {
+        f.close();
+        // Simple recursive delete not built-in, but we can try rmdir
+        SD.rmdir(path.c_str());
+      }
+      else
+      {
+        f.close();
+        SD.remove(path.c_str());
+      }
     }
 
-    String output = "[";
-    output.reserve(1024); // Start with a reasonable size
-    File file = root.openNextFile();
-    while (file) {
-        if (output.length() > 1) output += ",";
-        output += "{\"name\":\"";
-        output += file.name();
-        output += "\",\"type\":\"";
-        output += (file.isDirectory() ? "dir" : "file");
-        output += "\",\"size\":";
-        output += String(file.size());
-        output += "}";
-        
-        file = root.openNextFile();
-    }
-    output += "]";
-    server.send(200, "application/json", output);
+    pathsStr = pathsStr.substring(endQuote + 1);
+    int comma = pathsStr.indexOf(",");
+    if (comma != -1)
+      pathsStr = pathsStr.substring(comma + 1);
+    else
+      break;
+  }
+  server.send(200, "text/plain", "OK");
 }
 
-static void handleDelete() {
-    if (server.hasArg("plain") == false) {
-        server.send(400, "text/plain", "Body not received");
-        return;
+static void handleRename()
+{
+  String oldPath = server.arg("old");
+  String newPath = server.arg("new");
+  if (oldPath != "" && newPath != "")
+  {
+    if (SD.rename(oldPath, newPath))
+    {
+      server.send(200, "text/plain", "OK");
+      return;
     }
-    String body = server.arg("plain");
-    // Simple JSON parse for {"paths":["/path1", "/path2"]}
-    int start = body.indexOf("[");
-    int end = body.lastIndexOf("]");
-    if (start == -1 || end == -1) {
-        server.send(400, "text/plain", "Invalid JSON");
-        return;
-    }
-    String pathsStr = body.substring(start + 1, end);
-    
-    while (pathsStr.length() > 0) {
-        int nextQuote = pathsStr.indexOf("\"");
-        if (nextQuote == -1) break;
-        pathsStr = pathsStr.substring(nextQuote + 1);
-        int endQuote = pathsStr.indexOf("\"");
-        if (endQuote == -1) break;
-        String path = pathsStr.substring(0, endQuote);
-        
-        Serial.printf("Deleting: %s\n", path.c_str());
-        if (SD.exists(path)) {
-            File f = SD.open(path);
-            if (f.isDirectory()) {
-                f.close();
-                // Simple recursive delete not built-in, but we can try rmdir
-                SD.rmdir(path.c_str()); 
-            } else {
-                f.close();
-                SD.remove(path.c_str());
-            }
+  }
+  server.send(500, "text/plain", "Rename failed");
+}
+
+static void handleUpload()
+{
+  HTTPUpload &upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START)
+  {
+    String filename = upload.filename;
+    if (!filename.startsWith("/"))
+      filename = "/" + filename;
+
+    // Ensure directories exist
+    int slashIdx = filename.lastIndexOf('/');
+    if (slashIdx > 0)
+    {
+      String dir = filename.substring(0, slashIdx);
+      if (!SD.exists(dir))
+      {
+        // Create recursive directories
+        String current = "";
+        String remaining = dir;
+        if (remaining.startsWith("/"))
+          remaining = remaining.substring(1);
+        while (remaining.length() > 0)
+        {
+          int nextSlash = remaining.indexOf('/');
+          String part;
+          if (nextSlash != -1)
+          {
+            part = remaining.substring(0, nextSlash);
+            remaining = remaining.substring(nextSlash + 1);
+          }
+          else
+          {
+            part = remaining;
+            remaining = "";
+          }
+          current += "/" + part;
+          if (!SD.exists(current))
+            SD.mkdir(current);
         }
-        
-        pathsStr = pathsStr.substring(endQuote + 1);
-        int comma = pathsStr.indexOf(",");
-        if (comma != -1) pathsStr = pathsStr.substring(comma + 1);
-        else break;
+      }
     }
+
+    Serial.printf("Upload Start: %s\n", filename.c_str());
+    File file = SD.open(filename, FILE_WRITE);
+    if (!file)
+    {
+      Serial.println("Failed to open file for writing");
+    }
+    file.close(); // Will re-open in write mode during UPLOAD_FILE_WRITE
+  }
+  else if (upload.status == UPLOAD_FILE_WRITE)
+  {
+    String filename = upload.filename;
+    if (!filename.startsWith("/"))
+      filename = "/" + filename;
+    File file = SD.open(filename, FILE_APPEND);
+    if (file)
+    {
+      file.write(upload.buf, upload.currentSize);
+      file.close();
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_END)
+  {
     server.send(200, "text/plain", "OK");
+  }
 }
 
-static void handleRename() {
-    String oldPath = server.arg("old");
-    String newPath = server.arg("new");
-    if (oldPath != "" && newPath != "") {
-        if (SD.rename(oldPath, newPath)) {
-            server.send(200, "text/plain", "OK");
-            return;
-        }
-    }
-    server.send(500, "text/plain", "Rename failed");
+void startWifiServer()
+{
+  if (running)
+    return;
+  WiFi.softAP(apSSID.c_str());
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/list", HTTP_GET, handleList);
+  server.on("/delete", HTTP_POST, handleDelete);
+  server.on("/rename", HTTP_GET, handleRename);
+  server.on("/upload", HTTP_POST, []()
+            { server.send(200); }, handleUpload);
+
+  server.begin();
+  running = true;
+  Serial.println("WiFi Server Started");
+  Serial.print("IP: ");
+  Serial.println(WiFi.softAPIP());
 }
 
-static void handleUpload() {
-    HTTPUpload& upload = server.upload();
-    if (upload.status == UPLOAD_FILE_START) {
-        String filename = upload.filename;
-        if (!filename.startsWith("/")) filename = "/" + filename;
-        
-        // Ensure directories exist
-        int slashIdx = filename.lastIndexOf('/');
-        if (slashIdx > 0) {
-            String dir = filename.substring(0, slashIdx);
-            if (!SD.exists(dir)) {
-                // Create recursive directories
-                String current = "";
-                String remaining = dir;
-                if (remaining.startsWith("/")) remaining = remaining.substring(1);
-                while (remaining.length() > 0) {
-                    int nextSlash = remaining.indexOf('/');
-                    String part;
-                    if (nextSlash != -1) {
-                        part = remaining.substring(0, nextSlash);
-                        remaining = remaining.substring(nextSlash + 1);
-                    } else {
-                        part = remaining;
-                        remaining = "";
-                    }
-                    current += "/" + part;
-                    if (!SD.exists(current)) SD.mkdir(current);
-                }
-            }
-        }
-        
-        Serial.printf("Upload Start: %s\n", filename.c_str());
-        File file = SD.open(filename, FILE_WRITE);
-        if (!file) {
-            Serial.println("Failed to open file for writing");
-        }
-        file.close(); // Will re-open in write mode during UPLOAD_FILE_WRITE
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
-        String filename = upload.filename;
-        if (!filename.startsWith("/")) filename = "/" + filename;
-        File file = SD.open(filename, FILE_APPEND);
-        if (file) {
-            file.write(upload.buf, upload.currentSize);
-            file.close();
-        }
-    } else if (upload.status == UPLOAD_FILE_END) {
-        server.send(200, "text/plain", "OK");
-    }
+void stopWifiServer()
+{
+  if (!running)
+    return;
+  server.stop();
+  WiFi.softAPdisconnect(true);
+  running = false;
+  Serial.println("WiFi Server Stopped");
 }
 
-void startWifiServer() {
-    if (running) return;
-    WiFi.softAP(apSSID.c_str());
-    
-    server.on("/", HTTP_GET, handleRoot);
-    server.on("/list", HTTP_GET, handleList);
-    server.on("/delete", HTTP_POST, handleDelete);
-    server.on("/rename", HTTP_GET, handleRename);
-    server.on("/upload", HTTP_POST, []() { server.send(200); }, handleUpload);
-    
-    server.begin();
-    running = true;
-    Serial.println("WiFi Server Started");
-    Serial.print("IP: "); Serial.println(WiFi.softAPIP());
-}
-
-void stopWifiServer() {
-    if (!running) return;
-    server.stop();
-    WiFi.softAPdisconnect(true);
-    running = false;
-    Serial.println("WiFi Server Stopped");
-}
-
-void updateWifiServer() {
-    if (running) server.handleClient();
+void updateWifiServer()
+{
+  if (running)
+    server.handleClient();
 }
 
 bool isWifiServerRunning() { return running; }

@@ -1,14 +1,15 @@
 #pragma once
 
+#include "config.h"
 #include <Arduino.h>
-#include <vector>
 #include <M5GFX.h>
 #include <Preferences.h>
-#include "config.h"
+#include <vector>
 
-struct Bookmark {
-    String folder;
-    int page;
+struct Bookmark
+{
+  String folder;
+  int page;
 };
 
 extern AppState appState;
@@ -49,7 +50,8 @@ extern bool isNextPageReady;
 
 extern std::vector<Bookmark> bookmarks;
 
-inline void requestRedraw(epd_mode_t mode = epd_mode_t::epd_fast) {
-    currentEpdMode = mode;
-    needRedraw = true;
+inline void requestRedraw(epd_mode_t mode = epd_mode_t::epd_fast)
+{
+  currentEpdMode = mode;
+  needRedraw = true;
 }

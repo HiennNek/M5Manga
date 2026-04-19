@@ -5,9 +5,9 @@
 
 void sdInit();
 void scanMangaFolders();
-String makePagePath(const String& folder, int n);
-bool pageExists(const String& folder, int n);
-int findTotalPages(const String& folder);
+String makePagePath(const String &folder, int n);
+bool pageExists(const String &folder, int n);
+int findTotalPages(const String &folder);
 
 void saveProgress();
 void loadProgress();

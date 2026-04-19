@@ -4,4 +4,4 @@
 #include "state.h"
 
 void openManga(int idx);
-void openMangaPath(const String& path, int page);
+void openMangaPath(const String &path, int page);

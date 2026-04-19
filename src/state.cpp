@@ -1,5 +1,5 @@
-#include <M5Unified.h>
 #include "state.h"
+#include <M5Unified.h>
 
 AppState appState = STATE_MENU;
 std::vector<String> mangaFolders;
