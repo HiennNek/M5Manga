@@ -25,7 +25,8 @@ extern bool needRedraw;
 extern bool controlMenuOpen;
 extern bool bookConfigOpen;
 extern int bookConfigPendingPage;
-extern bool isDitheringEnabled;
+extern DitherMode ditherMode;
+extern ContrastPreset contrastPreset;
 extern bool isMagnifierActive;
 extern int magnifierX, magnifierY;
 extern String selectedBookmarkFolder;
@@ -47,3 +48,8 @@ extern int preloadedPage;
 extern bool isNextPageReady;
 
 extern std::vector<Bookmark> bookmarks;
+
+inline void requestRedraw(epd_mode_t mode = epd_mode_t::epd_fast) {
+    currentEpdMode = mode;
+    needRedraw = true;
+}

@@ -33,8 +33,37 @@
 #define THUMB_H       (int(THUMB_W * 1.41))
 #define GRID_ROW_H    (THUMB_H + 60)
 #define MENU_VISIBLE  (GRID_COLS * 2)
-#define UI_RADIUS     10
+#define UI_RADIUS     8
+
+// High-contrast UI colors
+#define UI_BG         TFT_WHITE
+#define UI_FG         TFT_BLACK
+#define UI_ACCENT     0xEEEE  // Light gray for active/filled backgrounds (never text)
+#define UI_BORDER     TFT_BLACK
+#define UI_SHADOW     TFT_BLACK
+
 #define MAG_SIZE      240
 #define MAG_SCALE     2
+
+// Touch gesture thresholds
+#define HEADER_H       100   // Height of header/top area that intercepts gestures
+#define SWIPE_HORIZ_MIN 60   // Minimum horizontal distance for a swipe
+#define LONG_PRESS_MS  600   // Milliseconds to trigger long-press (magnifier)
+
+enum DitherMode {
+    DITHER_OFF,
+    DITHER_FLOYD_STEINBERG,
+    DITHER_ATKINSON,
+    DITHER_ORDERED,
+    DITHER_COUNT  // Must be last — used for cycling
+};
+
+enum ContrastPreset {
+    CONTRAST_NORMAL,
+    CONTRAST_VIVID,        // +20% contrast — good all-rounder for e-ink
+    CONTRAST_HIGH,         // +40% contrast — for washed-out scans
+    CONTRAST_LIGHT,        // Brightness boost — for dark manga
+    CONTRAST_COUNT         // Must be last — used for cycling
+};
 
 enum AppState { STATE_MENU, STATE_READER, STATE_BOOKMARKS, STATE_WIFI };

@@ -44,3 +44,14 @@ void deleteBookmark(int idx) {
     bookmarks.erase(bookmarks.begin() + idx);
     saveBookmarks();
 }
+
+std::vector<String> getUniqueBookmarkFolders() {
+    std::vector<String> folders;
+    for (const auto& b : bookmarks) {
+        if (std::find(folders.begin(), folders.end(), b.folder) == folders.end()) {
+            folders.push_back(b.folder);
+        }
+    }
+    std::sort(folders.begin(), folders.end());
+    return folders;
+}
