@@ -1,10 +1,23 @@
 # M5Manga
 ### A fun vibe-coded project for reading manga using M5PaperS3
-<img width="40%" src="https://github.com/user-attachments/assets/57ec8940-cc68-4d7b-9026-b27e721a192d" /> Perfect for reading BL btw
+
+### Some image:
+
+<table>
+  <tr>
+    <td><img width="300" src="https://github.com/user-attachments/assets/e66626ce-f0b4-44ee-ba6c-09bd6ad23f59" /></td>
+    <td><img width="300" src="https://github.com/user-attachments/assets/b0349270-2c16-4a3b-965a-c684c1fa5909" /></td>
+    <td><img width="300" src="https://github.com/user-attachments/assets/f5f9a39d-05a0-475d-b03e-70a599b6549f" /></td>
+  </tr>
+</table>
+
+### Perfect for reading BL btw
+
+#
 
 # AI generated readme:
 
-# M5PaperS3 Manga Reader
+## M5PaperS3 Manga Reader
 
 A high-performance JPEG manga reader for the **M5PaperS3** e-ink device, featuring a grid-based library, bookmarking system, and smooth navigation. Built with **PlatformIO** and the **M5Unified** + **M5GFX** libraries.
 
