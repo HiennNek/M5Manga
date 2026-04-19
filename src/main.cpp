@@ -7,26 +7,31 @@
 #include "ui.h"
 #include "input.h"
 #include "navigation.h"
+#include "wifi_server.h"
 
 static unsigned long lastInteractionMs = 0;
 
 void setup() {
+    auto cfg = M5.config();
+    cfg.internal_spk = false;
+    cfg.internal_mic = false;
+    cfg.internal_imu = false;
+    M5.begin(cfg);
+
+    // Boost CPU for fast initialization
+    setCpuFrequencyMhz(240);
+
     Serial.begin(115200);
 
-    auto cfg = M5.config();
-    M5.begin(cfg);
-    setCpuFrequencyMhz(80);
+    randomSeed(micros());
 
     currentEpdMode = epd_mode_t::epd_fast;
     M5.Display.setRotation(0);
     M5.Display.setColorDepth(8);
     M5.Display.setEpdMode(epd_mode_t::epd_fast);
-    M5.Display.fillScreen(TFT_WHITE);
-    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Display.setFont(&fonts::DejaVu18);
-    M5.Display.setCursor(20, 20);
-    M5.Display.println("Initialising...");
-    M5.Display.display();
+    
+    // Skip the redundant "Initialising..." screen refresh to save ~1s of E-ink update time.
+    // The first real frame will be drawn in loop().
 
     sdInit();
     scanMangaFolders();
@@ -42,12 +47,18 @@ void loop() {
         lastInteractionMs = millis();
     }
 
+    if (appState == STATE_WIFI) {
+        updateWifiServer();
+    }
+
     if (needRedraw) {
+        setCpuFrequencyMhz(240);
         M5.Display.setEpdMode(currentEpdMode);
         if (controlMenuOpen)              drawControlCenter();
         else if (bookConfigOpen)          drawBookConfig();
         else if (appState == STATE_MENU)      drawMenu();
         else if (appState == STATE_BOOKMARKS) drawBookmarks();
+        else if (appState == STATE_WIFI)      drawWifiServer();
         else                                  drawPage();
         needRedraw = false;
     }
@@ -55,17 +66,22 @@ void loop() {
     handleTouch();
 
     bool readerIdle = appState == STATE_READER && !controlMenuOpen && !bookConfigOpen;
-    if (readerIdle) {
+    bool wifiActive = appState == STATE_WIFI;
+
+    if (wifiActive) {
+        setCpuFrequencyMhz(240);
+        delay(1); 
+    } else if (readerIdle) {
         if (millis() - lastInteractionMs >= 5000) {
             setCpuFrequencyMhz(80);
-            delay(80);
+            M5.delay(50); // M5.delay handles background tasks better
         } else {
             setCpuFrequencyMhz(240);
-            delay(20);
+            M5.delay(10);
         }
     } else {
         setCpuFrequencyMhz(240);
-        delay(20);
+        M5.delay(10);
     }
 }
 

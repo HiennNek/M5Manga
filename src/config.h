@@ -18,6 +18,7 @@
 
 // Manga root
 #define MANGA_ROOT "/manga"
+#define PIC_ROOT   "/pic"
 
 // Filename pattern
 #define IMG_PREFIX  "m5_"
@@ -33,5 +34,7 @@
 #define GRID_ROW_H    (THUMB_H + 60)
 #define MENU_VISIBLE  (GRID_COLS * 2)
 #define UI_RADIUS     10
+#define MAG_SIZE      240
+#define MAG_SCALE     2
 
-enum AppState { STATE_MENU, STATE_READER, STATE_BOOKMARKS };
+enum AppState { STATE_MENU, STATE_READER, STATE_BOOKMARKS, STATE_WIFI };

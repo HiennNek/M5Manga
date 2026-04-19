@@ -9,7 +9,12 @@
 void sdInit() {
     SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
     int retry = 0;
-    while (!SD.begin(SD_CS_PIN, SPI, 25000000)) {
+    // Boost SD SPI to 80MHz for maximum performance with UHS-I cards
+    while (!SD.begin(SD_CS_PIN, SPI, 80000000)) {
+        if (retry == 0) {
+            M5.Display.fillScreen(TFT_WHITE);
+            M5.Display.setCursor(20, 20);
+        }
         M5.Display.printf("SD init failed (attempt %d)...\n", ++retry);
         M5.Display.display();
         delay(1000);
@@ -76,13 +81,14 @@ static void storeCachedPageCount(const String& folder, int count) {
 }
 
 String makePagePath(const String& folder, int n) {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%s%0*d%s", IMG_PREFIX, IMG_DIGITS, n, IMG_SUFFIX);
-    return folder + "/" + buf;
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s/%s%0*d%s", folder.c_str(), IMG_PREFIX, IMG_DIGITS, n, IMG_SUFFIX);
+    return String(buf);
 }
 
-bool pageExists(const String& folder, int n) {
-    return SD.exists(makePagePath(folder, n).c_str());
+static bool pageExistsFast(char* buf, int prefixLen, int n) {
+    sprintf(buf + prefixLen, "/%s%0*d%s", IMG_PREFIX, IMG_DIGITS, n, IMG_SUFFIX);
+    return SD.exists(buf);
 }
 
 int findTotalPages(const String& folder) {
@@ -97,7 +103,12 @@ int findTotalPages(const String& folder) {
         return count;
     }
 
-    if (!pageExists(folder, 0)) {
+    char pathBuf[256];
+    strncpy(pathBuf, folder.c_str(), sizeof(pathBuf) - 64);
+    pathBuf[sizeof(pathBuf) - 65] = '\0';
+    int prefixLen = strlen(pathBuf);
+
+    if (!pageExistsFast(pathBuf, prefixLen, 0)) {
         cachedFolder = folder;
         cachedCount = 0;
         storeCachedPageCount(folder, 0);
@@ -105,7 +116,7 @@ int findTotalPages(const String& folder) {
     }
 
     int hi = 1;
-    while (pageExists(folder, hi)) {
+    while (pageExistsFast(pathBuf, prefixLen, hi)) {
         hi *= 2;
         if (hi > 100000) { hi = 100000; break; }
     }
@@ -113,7 +124,7 @@ int findTotalPages(const String& folder) {
     int lo = hi / 2;
     while (lo + 1 < hi) {
         int mid = lo + (hi - lo) / 2;
-        if (pageExists(folder, mid)) lo = mid;
+        if (pageExistsFast(pathBuf, prefixLen, mid)) lo = mid;
         else                         hi = mid;
     }
 
