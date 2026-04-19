@@ -19,7 +19,7 @@
 
 ## M5PaperS3 Manga Reader
 
-A high-performance JPEG manga reader for the **M5PaperS3** e-ink device, featuring a grid-based library, bookmarking system, and smooth navigation. Built with **PlatformIO** and the **M5Unified** + **M5GFX** libraries.
+A high-performance, commercial-grade manga reader for the **M5PaperS3** e-ink device. Featuring an optimized 8-level grayscale rendering stack, dithering algorithms, high-contrast modern UI, persistent bookmarks, and a built-in WiFi file manager. Built with **PlatformIO**, utilizing **M5GFX** for fast partial updates and **JPEGDEC** for rapid image decoding.
 
 ---
 
@@ -30,12 +30,13 @@ M5Manga/
 ├── platformio.ini      # Build configuration & dependencies
 └── src/
     ├── main.cpp        # Entry point & main loop
-    ├── config.h        # Hardware & UI constants
-    ├── state.h/cpp     # Global application state
-    ├── storage.h/cpp   # SD card, file search, & progress saving
-    ├── input.h/cpp     # Touch gesture handling
-    ├── ui.h/cpp        # Rendering logic for menu, reader, & overlays
-    ├── bookmarks.h/cpp # Bookmark management
+    ├── config.h        # Hardware, UI constants, & color palettes
+    ├── state.h/cpp     # Global application state & enums
+    ├── storage.h/cpp   # SD card, file search, & JSON bookmark storage
+    ├── input.h/cpp     # Touch gesture handling & interaction feedback
+    ├── ui.h/cpp        # Modern UI rendering (menus, modals, components)
+    ├── wifi_server.cpp # Asynchronous web server for file management
+    ├── bookmarks.cpp   # Bookmark persistence logic
     └── navigation.h    # Navigation helpers
 ```
 
@@ -69,19 +70,20 @@ Format your SD card as **FAT32**. Create the following structure:
 ### Library Menu
 | Action | Result |
 |---|---|
-| **Tap Item** | Select / Open manga |
-| **Swipe Up** | Refresh folder list |
-| **Swipe Down** | Scroll to next page of titles |
-| **Tap Bottom Bar** | Quick resume last read manga |
-| **Tap "★ Bookmarks"** | Open bookmarks library |
+| **Tap Thumbnail** | Open manga title |
+| **Swipe Up** | Refresh / Jump to top |
+| **Swipe Down** | Next page |
+| **Swipe Left/Right** | Previous/Next page |
+| **Tap "CONTINUE" Bar** | Quick resume last read manga |
+| **Tap "BOOKMARKS" Pill** | Open bookmarks library |
+| **Tap "FILES" Pill** | Start WiFi file browser |
 
 ### Manga Reader
 | Action | Result |
 |---|---|
-| **Tap Right Half** | Next page |
-| **Tap Left Half** | Previous page |
-| **Swipe Down (Top)** | Open **System Menu** (Shutdown, Battery) |
-| **Swipe Up (Bottom)** | Open **Book Menu** (Page jump, Bookmark, Exit) |
+| **Tap Right/Left Half** | Next/Previous page |
+| **Swipe Down** | Open **Control Center** (Battery, Shutdown) |
+| **Swipe Up** | Open **Book Menu** (Page jump, Display settings, Bookmarking) |
 
 ### Bookmarks View
 | Action | Result |
@@ -94,12 +96,13 @@ Format your SD card as **FAT32**. Create the following structure:
 
 ## Features
 
-- **Full-Screen Reading**: Optimized 540x960 rendering with no UI overlays during reading.
-- **Smart Resume**: Remembers your last read manga and page automatically.
-- **Binary Search Loading**: Quickly indexes thousands of pages in seconds.
-- **Battery Management**: Real-time battery level in System Menu.
-- **Performance**: Uses `epd_quality` for crisp manga pages and `epd_fast` for responsive UI menus.
-- **Power Efficiency**: Dynamic CPU frequency scaling (80MHz idle / 240MHz loading).
+- **Ultra-Fast Rendering**: Uses `M5GFX` sprites for direct display buffer writing and partial e-ink updates.
+- **Hardware Decoding**: Utilizes `JPEGDEC` to directly stream and map 8-bit grayscale pixels.
+- **Advanced Display Controls**: Toggle between multiple dithering modes (Floyd-Steinberg, Atkinson, Ordered) and contrast presets for optimal image clarity on the e-ink screen.
+- **Modern High-Contrast UI**: Beautiful, commercial-grade aesthetic with 8px rounded corners, dynamic touch feedback, and 4px drop-shadow modals.
+- **WiFi File Server**: Built-in async web server allows you to upload, delete, and organize manga zip/folders from any browser without removing the SD card.
+- **Persistent Bookmarks**: JSON-backed bookmarking system (`ArduinoJson`) to save and resume reading positions seamlessly.
+- **Smart Resume**: "Continue Reading" pill bar remembers your exact location across reboots.
 
 ---
 
@@ -108,8 +111,11 @@ Format your SD card as **FAT32**. Create the following structure:
 - **Hardware**: M5PaperS3 (ESP32-S3).
 - **PSRAM**: Mandatory (configured in `platformio.ini`).
 - **Libraries**:
-    - `m5stack/M5Unified` (tested 0.2.13)
-    - `m5stack/M5GFX` (tested 0.2.7)
+    - `m5stack/M5Unified` (Power & Touch management)
+    - `m5stack/M5GFX` (Display rendering)
+    - `bitbank2/JPEGDEC` (Image decoding)
+    - `bblanchon/ArduinoJson` (Settings & bookmarks storage)
+    - `ESPAsyncWebServer` & `AsyncTCP` (WiFi file management)
 
 ---
 
