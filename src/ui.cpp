@@ -15,6 +15,77 @@
 #include <M5Unified.h>
 #include <algorithm>
 #include <esp_heap_caps.h>
+#include <JPEGDEC.h>
+
+static JPEGDEC jpeg;
+
+struct JpegDrawContext {
+    LGFX_Sprite* spr;
+    int offsetX;
+    int offsetY;
+    int maxWidth;
+    int maxHeight;
+};
+
+static int drawMCU(JPEGDRAW *pDraw) {
+    JpegDrawContext* ctx = (JpegDrawContext*)pDraw->pUser;
+    LGFX_Sprite* spr = ctx->spr;
+    uint16_t* pixels = (uint16_t*)pDraw->pPixels;
+    uint16_t* sprBuffer = (uint16_t*)spr->getBuffer();
+    
+    int sprWidth = spr->width();
+    int sprHeight = spr->height();
+    
+    int cx = pDraw->x;
+    int cy = pDraw->y;
+    int cw = pDraw->iWidth;
+    int ch = pDraw->iHeight;
+    
+    if (ctx->maxWidth > 0 && cx + cw > ctx->maxWidth) cw = ctx->maxWidth - cx;
+    if (ctx->maxHeight > 0 && cy + ch > ctx->maxHeight) ch = ctx->maxHeight - cy;
+    if (cw <= 0 || ch <= 0) return 1;
+
+    int outX = cx + ctx->offsetX;
+    int outY = cy + ctx->offsetY;
+
+    if (outX >= sprWidth || outY >= sprHeight) return 1;
+    if (outX < 0) { cw += outX; outX = 0; }
+    if (outY < 0) { ch += outY; outY = 0; }
+    if (outX + cw > sprWidth) cw = sprWidth - outX;
+    if (outY + ch > sprHeight) ch = sprHeight - outY;
+
+    if (cw <= 0 || ch <= 0) return 1;
+
+    for (int y = 0; y < ch; y++) {
+        memcpy(&sprBuffer[(outY + y) * sprWidth + outX], &pixels[y * pDraw->iWidth], cw * 2);
+    }
+    
+    return 1;
+}
+
+static bool drawJpgWithJpegDec(LGFX_Sprite& spr, uint8_t* buf, size_t size, int x, int y, int maxWidth, int maxHeight) {
+    JpegDrawContext ctx = {&spr, x, y, maxWidth, maxHeight};
+    if (jpeg.openRAM(buf, size, drawMCU)) {
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.setUserPointer(&ctx);
+        bool res = jpeg.decode(0, 0, 0);
+        jpeg.close();
+        return res;
+    }
+    return false;
+}
+
+static bool drawJpgWithJpegDecFile(LGFX_Sprite& spr, File& file, int x, int y, int maxWidth, int maxHeight) {
+    JpegDrawContext ctx = {&spr, x, y, maxWidth, maxHeight};
+    if (jpeg.open(file, drawMCU)) {
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.setUserPointer(&ctx);
+        bool res = jpeg.decode(0, 0, 0);
+        jpeg.close();
+        return res;
+    }
+    return false;
+}
 
 static bool forceFullMenuRedraw = true;
 
@@ -493,13 +564,11 @@ void preloadPage(int page)
   {
     pageFile.read(jpgBuffer, fileSize);
     pageFile.close();
-    success =
-        nextPageSprite.drawJpg(jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H,
-                               0, 0, 0.0f, 0.0f, datum_t::top_left);
+    success = drawJpgWithJpegDec(nextPageSprite, jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H);
   }
   else
   {
-    success = nextPageSprite.drawJpg(&pageFile, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+    success = drawJpgWithJpegDecFile(nextPageSprite, pageFile, 0, 0, DISPLAY_W, DISPLAY_H);
     pageFile.close();
   }
 
@@ -865,7 +934,7 @@ void systemShutdown()
       File f = SD.open(path.c_str());
       if (f)
       {
-        if (gSprite.drawJpg(&f, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left))
+        if (drawJpgWithJpegDecFile(gSprite, f, 0, 0, DISPLAY_W, DISPLAY_H))
         {
           M5.Display.startWrite();
           gSprite.pushSprite(0, 0);
@@ -1176,11 +1245,11 @@ void drawPage()
     {
       pageFile.read(jpgBuffer, fileSize);
       pageFile.close();
-      decodeSuccess = gSprite.drawJpg(jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+      decodeSuccess = drawJpgWithJpegDec(gSprite, jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H);
     }
     else
     {
-      decodeSuccess = gSprite.drawJpg(&pageFile, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+      decodeSuccess = drawJpgWithJpegDecFile(gSprite, pageFile, 0, 0, DISPLAY_W, DISPLAY_H);
       pageFile.close();
     }
 
