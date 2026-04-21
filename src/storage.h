@@ -8,7 +8,7 @@ void scanMangaFolders();
 String makePagePath(const String &folder, int n);
 bool pageExists(const String &folder, int n);
 int findTotalPages(const String &folder);
-
+void loadConfig();
 void saveProgress();
 void loadProgress();
 void updateLastMangaName();

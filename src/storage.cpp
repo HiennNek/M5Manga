@@ -179,7 +179,34 @@ void saveProgress()
   prefs.begin("manga", false);
   prefs.putString("lastPath", currentMangaPath);
   prefs.putInt("lastPage", currentPage);
+  prefs.putInt("lastStrip", currentStrip);
+  prefs.putBool("horizMode", horizontalMode);
   prefs.end();
+}
+
+void loadConfig()
+{
+  File f = SD.open("/manga/config.txt");
+  if (f)
+  {
+    while (f.available())
+    {
+      String line = f.readStringUntil('\n');
+      line.trim();
+      if (line.startsWith("strips_per_page="))
+      {
+        stripsPerPage = line.substring(16).toInt();
+        if (stripsPerPage < 1)
+          stripsPerPage = 1;
+      }
+      else if (line.startsWith("strip_overlap_px="))
+      {
+        stripOverlapPx = line.substring(17).toInt();
+      }
+    }
+    f.close();
+    Serial.printf("Config loaded: strips=%d, overlap=%d\n", stripsPerPage, stripOverlapPx);
+  }
 }
 
 void loadProgress()
@@ -187,6 +214,8 @@ void loadProgress()
   prefs.begin("manga", true);
   lastMangaPath = prefs.getString("lastPath", "");
   lastPage = prefs.getInt("lastPage", 0);
+  currentStrip = prefs.getInt("lastStrip", 0);
+  horizontalMode = prefs.getBool("horizMode", false);
   prefs.end();
   updateLastMangaName();
 }

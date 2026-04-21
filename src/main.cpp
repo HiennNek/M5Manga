@@ -27,16 +27,19 @@ void setup()
   randomSeed(micros());
 
   currentEpdMode = epd_mode_t::epd_fast;
-  M5.Display.setRotation(0);
+  
+  sdInit();
+  loadConfig();
+  loadProgress();
+  
+  M5.Display.setRotation(horizontalMode ? 1 : 0);
   M5.Display.setColorDepth(8);
   M5.Display.setEpdMode(epd_mode_t::epd_fast);
 
   // Skip the redundant "Initialising..." screen refresh to save ~1s of E-ink
   // update time. The first real frame will be drawn in loop().
 
-  sdInit();
   scanMangaFolders();
-  loadProgress();
   loadBookmarks();
 
   needRedraw = true;

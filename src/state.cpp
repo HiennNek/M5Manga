@@ -21,6 +21,10 @@ bool isMagnifierActive = false;
 int magnifierX = 0, magnifierY = 0;
 String selectedBookmarkFolder = "";
 epd_mode_t currentEpdMode = epd_mode_t::epd_fast;
+bool horizontalMode = false;
+int currentStrip = 0;
+int stripsPerPage = 3;
+int stripOverlapPx = 20;
 
 Preferences prefs;
 LGFX_Sprite gSprite(&M5.Display);
@@ -34,6 +38,7 @@ String lastMangaName = "";
 
 String preloadedMangaPath = "";
 int preloadedPage = -1;
+int preloadedStrip = 0;
 bool isNextPageReady = false;
 
 std::vector<Bookmark> bookmarks;

@@ -526,14 +526,14 @@ void resetMagnifierTracking()
   lastOutY = -1;
 }
 
-void preloadPage(int page)
+void preloadPage(int page, int strip)
 {
   if (page < 0 || page >= totalPages)
   {
     isNextPageReady = false;
     return;
   }
-  if (isNextPageReady && preloadedPage == page &&
+  if (isNextPageReady && preloadedPage == page && preloadedStrip == strip &&
       preloadedMangaPath == currentMangaPath)
   {
     return;
@@ -542,7 +542,10 @@ void preloadPage(int page)
   setCpuFrequencyMhz(240);
   String path = makePagePath(currentMangaPath, page);
 
-  prepareSprite(nextPageSprite, DISPLAY_W, DISPLAY_H, 16, true);
+  int screenW = horizontalMode ? 960 : 540;
+  int screenH = horizontalMode ? 540 : 960;
+
+  prepareSprite(nextPageSprite, screenW, screenH, 16, true);
   if (!nextPageSprite.getBuffer())
   {
     isNextPageReady = false;
@@ -564,11 +567,55 @@ void preloadPage(int page)
   {
     pageFile.read(jpgBuffer, fileSize);
     pageFile.close();
-    success = drawJpgWithJpegDec(nextPageSprite, jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H);
+    if (jpeg.openRAM(jpgBuffer, fileSize, drawMCU))
+    {
+      int imgW = jpeg.getWidth();
+      int imgH = jpeg.getHeight();
+      
+      static LGFX_Sprite fullPageSprite(&M5.Display);
+      prepareSprite(fullPageSprite, imgW, imgH, 16, true);
+      
+      JpegDrawContext ctx = {&fullPageSprite, 0, 0, imgW, imgH};
+      jpeg.setPixelType(RGB565_BIG_ENDIAN);
+      jpeg.setUserPointer(&ctx);
+      success = jpeg.decode(0, 0, 0);
+      jpeg.close();
+
+      if (success)
+      {
+        nextPageSprite.fillScreen(TFT_WHITE);
+        if (horizontalMode)
+        {
+          int stripH = imgH / stripsPerPage;
+          int yStart = strip * stripH;
+          int yEnd = (strip + 1) * stripH;
+          if (strip > 0) yStart -= stripOverlapPx;
+          if (strip < stripsPerPage - 1) yEnd += stripOverlapPx;
+          int actualStripH = yEnd - yStart;
+
+          float scaleX = (float)screenW / (float)imgW;
+          float scaleY = (float)screenH / (float)actualStripH;
+
+          fullPageSprite.setPivot(0, yStart);
+          fullPageSprite.pushRotateZoom(&nextPageSprite, 0, 0, 0, scaleX, scaleY);
+        }
+        else
+        {
+          float scale = std::min((float)screenW / (float)imgW, (float)screenH / (float)imgH);
+          int outW = (int)(imgW * scale);
+          int outH = (int)(imgH * scale);
+          int offsetX = (screenW - outW) / 2;
+          int offsetY = (screenH - outH) / 2;
+          
+          fullPageSprite.pushRotateZoom(&nextPageSprite, offsetX + outW / 2, offsetY + outH / 2, 0, scale, scale);
+        }
+      }
+      fullPageSprite.deleteSprite();
+    }
   }
   else
   {
-    success = drawJpgWithJpegDecFile(nextPageSprite, pageFile, 0, 0, DISPLAY_W, DISPLAY_H);
+    success = drawJpgWithJpegDecFile(nextPageSprite, pageFile, 0, 0, screenW, screenH);
     pageFile.close();
   }
 
@@ -580,6 +627,7 @@ void preloadPage(int page)
       applyDithering(nextPageSprite);
     }
     preloadedPage = page;
+    preloadedStrip = strip;
     preloadedMangaPath = currentMangaPath;
     isNextPageReady = true;
   }
@@ -596,6 +644,7 @@ void drawMenu()
   static int drawnLastPage = -1;
   static int drawnLastMenuScroll = -1;
 
+  M5.Display.setRotation(0);
   int totalItems = (int)mangaFolders.size() + 2;
   int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
@@ -845,6 +894,7 @@ void drawMenu()
 void drawControlCenter()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
   if (!gSprite.getBuffer())
     return;
@@ -928,6 +978,7 @@ void systemShutdown()
     String path = pics[r];
     if (!path.startsWith("/"))
       path = String(PIC_ROOT) + "/" + path;
+    M5.Display.setRotation(0);
     prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
     if (gSprite.getBuffer())
     {
@@ -958,12 +1009,13 @@ void systemShutdown()
 void drawBookConfig()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
   if (!gSprite.getBuffer())
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
   int modW = 460;
-  int modH = 490;
+  int modH = 560; // Increased height for new button
   int modX = (DISPLAY_W - modW) / 2;
   int modY = (DISPLAY_H - modH) / 2;
 
@@ -1017,10 +1069,14 @@ void drawBookConfig()
   drawModernButton(gSprite, btnX, btnY1, btnW, btnH, contrastMsg.c_str(),
                    false);
 
-  int btnY2 = modY + 330;
+  int btnYMode = modY + 330;
+  String modeMsg = horizontalMode ? "MODE: HORIZONTAL" : "MODE: VERTICAL";
+  drawModernButton(gSprite, btnX, btnYMode, btnW, btnH, modeMsg.c_str(), false);
+
+  int btnY2 = modY + 400;
   drawModernButton(gSprite, btnX, btnY2, btnW, btnH, "BOOKMARK PAGE", false);
 
-  int btnY3 = modY + 400;
+  int btnY3 = modY + 470;
   drawModernButton(gSprite, btnX, btnY3, btnW, btnH, "RETURN TO LIBRARY", true);
 
   M5.Display.startWrite();
@@ -1032,6 +1088,7 @@ void drawBookConfig()
 void drawBookmarks()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
   if (!gSprite.getBuffer())
     return;
@@ -1151,6 +1208,7 @@ void drawBookmarks()
 void drawWifiServer()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   if (!isWifiServerRunning())
     startWifiServer();
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
@@ -1202,15 +1260,19 @@ void drawPage()
 
   setCpuFrequencyMhz(240);
 
-  // 1. Instant turn logic: Check if requested page is preloaded
+  // Set rotation based on mode
+  M5.Display.setRotation(horizontalMode ? 1 : 0);
+  int screenW = M5.Display.width();
+  int screenH = M5.Display.height();
+
+  // 1. Instant turn logic: Check if requested page/strip is preloaded
   if (isNextPageReady && preloadedPage == currentPage &&
+      preloadedStrip == currentStrip &&
       preloadedMangaPath == currentMangaPath)
   {
-    Serial.printf("Instant turn for page %d\n", currentPage + 1);
+    Serial.printf("Instant turn for page %d strip %d\n", currentPage + 1, currentStrip);
 
-    // Swap buffers/sprites or just draw nextPageSprite to gSprite
-    // The most robust way in LGFX without direct pointer hacking is pushSprite
-    prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
+    prepareSprite(gSprite, screenW, screenH, 16, true);
     nextPageSprite.pushSprite(&gSprite, 0, 0);
 
     isNextPageReady = false; // Used it up
@@ -1218,10 +1280,10 @@ void drawPage()
   else
   {
     String path = makePagePath(currentMangaPath, currentPage);
-    Serial.printf("Drawing [%d/%d]: %s\n", currentPage + 1, totalPages,
-                  path.c_str());
+    Serial.printf("Drawing [%d/%d] Strip %d: %s\n", currentPage + 1, totalPages,
+                  currentStrip, path.c_str());
 
-    prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
+    prepareSprite(gSprite, screenW, screenH, 16, true);
     if (!gSprite.getBuffer())
     {
       setCpuFrequencyMhz(80);
@@ -1245,11 +1307,56 @@ void drawPage()
     {
       pageFile.read(jpgBuffer, fileSize);
       pageFile.close();
-      decodeSuccess = drawJpgWithJpegDec(gSprite, jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H);
+      if (jpeg.openRAM(jpgBuffer, fileSize, drawMCU))
+      {
+        int imgW = jpeg.getWidth();
+        int imgH = jpeg.getHeight();
+        
+        static LGFX_Sprite fullPageSprite(&M5.Display);
+        prepareSprite(fullPageSprite, imgW, imgH, 16, true);
+        
+        JpegDrawContext ctx = {&fullPageSprite, 0, 0, imgW, imgH};
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.setUserPointer(&ctx);
+        decodeSuccess = jpeg.decode(0, 0, 0);
+        jpeg.close();
+
+        if (decodeSuccess)
+        {
+          gSprite.fillScreen(TFT_WHITE);
+          if (horizontalMode)
+          {
+            int stripH = imgH / stripsPerPage;
+            int yStart = currentStrip * stripH;
+            int yEnd = (currentStrip + 1) * stripH;
+            if (currentStrip > 0) yStart -= stripOverlapPx;
+            if (currentStrip < stripsPerPage - 1) yEnd += stripOverlapPx;
+            int actualStripH = yEnd - yStart;
+
+            float scaleX = (float)screenW / (float)imgW;
+            float scaleY = (float)screenH / (float)actualStripH;
+            
+            fullPageSprite.setPivot(0, yStart);
+            fullPageSprite.pushRotateZoom(&gSprite, 0, 0, 0, scaleX, scaleY);
+          }
+          else
+          {
+            float scale = std::min((float)screenW / (float)imgW, (float)screenH / (float)imgH);
+            int outW = (int)(imgW * scale);
+            int outH = (int)(imgH * scale);
+            int offsetX = (screenW - outW) / 2;
+            int offsetY = (screenH - outH) / 2;
+            
+            fullPageSprite.pushRotateZoom(&gSprite, offsetX + outW / 2, offsetY + outH / 2, 0, scale, scale);
+          }
+        }
+        fullPageSprite.deleteSprite();
+      }
     }
     else
     {
-      decodeSuccess = drawJpgWithJpegDecFile(gSprite, pageFile, 0, 0, DISPLAY_W, DISPLAY_H);
+      // Fallback if jpgBuffer fails (rare)
+      decodeSuccess = drawJpgWithJpegDecFile(gSprite, pageFile, 0, 0, screenW, screenH);
       pageFile.close();
     }
 
@@ -1271,10 +1378,26 @@ void drawPage()
   M5.Display.display();
   M5.Display.endWrite();
 
-  // 2. Preload NEXT page in background (after rendering current)
-  if (currentPage < totalPages - 1)
+  // 2. Preload NEXT content in background
+  int nextPg = currentPage;
+  int nextStrip = currentStrip + 1;
+  if (horizontalMode)
   {
-    preloadPage(currentPage + 1);
+    if (nextStrip >= stripsPerPage)
+    {
+      nextPg++;
+      nextStrip = 0;
+    }
+  }
+  else
+  {
+    nextPg++;
+    nextStrip = 0;
+  }
+
+  if (nextPg < totalPages)
+  {
+    preloadPage(nextPg, nextStrip);
   }
 
   setCpuFrequencyMhz(80);

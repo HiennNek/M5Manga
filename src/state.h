@@ -33,6 +33,11 @@ extern int magnifierX, magnifierY;
 extern String selectedBookmarkFolder;
 extern epd_mode_t currentEpdMode;
 
+extern bool horizontalMode;
+extern int currentStrip;
+extern int stripsPerPage;
+extern int stripOverlapPx;
+
 extern Preferences prefs;
 
 extern LGFX_Sprite gSprite;
@@ -46,6 +51,7 @@ extern String lastMangaName;
 
 extern String preloadedMangaPath;
 extern int preloadedPage;
+extern int preloadedStrip;
 extern bool isNextPageReady;
 
 extern std::vector<Bookmark> bookmarks;

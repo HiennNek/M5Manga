@@ -9,7 +9,7 @@ void drawBookConfig();
 void drawBookmarks();
 void drawWifiServer();
 void drawPage();
-void preloadPage(int page);
+void preloadPage(int page, int strip);
 void drawMagnifier(int x, int y, bool qualityMode = false);
 void resetMagnifierTracking();
 void applyFloydSteinberg(LGFX_Sprite &sprite);
