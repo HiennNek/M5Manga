@@ -76,6 +76,15 @@ enum ContrastPreset
   CONTRAST_COUNT  // Must be last — used for cycling
 };
 
+enum FitMode
+{
+  FIT_SCREEN, // Fits entire image to screen
+  FIT_WIDTH,  // Fits width to screen, scrolls vertically if needed
+  FIT_HEIGHT, // Fits height to screen, scrolls horizontally if needed
+  FIT_SMART,  // Auto-detect based on image aspect ratio
+  FIT_COUNT
+};
+
 enum AppState
 {
   STATE_MENU,

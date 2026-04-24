@@ -17,6 +17,7 @@ bool bookConfigOpen = false;
 int bookConfigPendingPage = 0;
 DitherMode ditherMode = DITHER_FLOYD_STEINBERG;
 ContrastPreset contrastPreset = CONTRAST_NORMAL;
+FitMode fitMode = FIT_SMART;
 bool isMagnifierActive = false;
 int magnifierX = 0, magnifierY = 0;
 String selectedBookmarkFolder = "";

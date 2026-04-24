@@ -540,10 +540,10 @@ void handleReaderTouch(const m5::touch_detail_t &t)
       // 2. Tap to turn page (if not a long press)
       if (millis() - pressStart < LONG_PRESS_MS)
       {
-        int zoneW = M5.Display.width() / 2;
-        if (t.x >= zoneW)
+        if (stripsPerPage > 1)
         {
-          if (horizontalMode)
+          int zoneW = M5.Display.width() / 2;
+          if (t.x >= zoneW)
           {
             currentStrip++;
             if (currentStrip >= stripsPerPage)
@@ -568,25 +568,13 @@ void handleReaderTouch(const m5::touch_detail_t &t)
           }
           else
           {
-            if (currentPage < totalPages - 1)
-            {
-              currentPage++;
-              requestRedraw(epd_mode_t::epd_quality);
-              saveProgress();
-            }
-          }
-        }
-        else
-        {
-          if (horizontalMode)
-          {
             currentStrip--;
             if (currentStrip < 0)
             {
               if (currentPage > 0)
               {
                 currentPage--;
-                currentStrip = stripsPerPage - 1;
+                currentStrip = -1; // Special value, drawPage will calculate stripsPerPage
                 requestRedraw(epd_mode_t::epd_quality);
                 saveProgress();
               }
@@ -601,11 +589,26 @@ void handleReaderTouch(const m5::touch_detail_t &t)
               saveProgress();
             }
           }
+        }
+        else
+        {
+          int zoneW = M5.Display.width() / 2;
+          if (t.x >= zoneW)
+          {
+            if (currentPage < totalPages - 1)
+            {
+              currentPage++;
+              currentStrip = 0;
+              requestRedraw(epd_mode_t::epd_quality);
+              saveProgress();
+            }
+          }
           else
           {
             if (currentPage > 0)
             {
               currentPage--;
+              currentStrip = 0;
               requestRedraw(epd_mode_t::epd_quality);
               saveProgress();
             }
@@ -626,7 +629,7 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   int tapX = t.x;
   int tapY = t.y;
   int modW = 460;
-  int modH = 560;
+  int modH = 640;
   int modX = (M5.Display.width() - modW) / 2;
   int modY = (M5.Display.height() - modH) / 2;
 
@@ -695,13 +698,23 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     return;
   }
 
-  // 3. Bookmark Page
-  int btnY2 = modY + 400;
+  // 3. FIT Mode Toggle
+  int btnYFit = modY + 400;
+  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYFit &&
+      tapY <= btnYFit + btnH)
+  {
+    fitMode = (FitMode)((fitMode + 1) % FIT_COUNT);
+    isNextPageReady = false;
+    requestRedraw();
+    return;
+  }
+
+  // 4. Bookmark Page
+  int btnY2 = modY + 470;
   if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY2 &&
       tapY <= btnY2 + btnH)
   {
-    // ... rest of Bookmark logic
-    // Flash with label
+    // ... Bookmark logic
     M5.Display.startWrite();
     M5.Display.fillRoundRect(btnX, btnY2, btnW, btnH, UI_RADIUS, UI_FG);
     M5.Display.setTextColor(UI_BG, UI_FG);
@@ -720,8 +733,8 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     return;
   }
 
-  // 4. Return to Library
-  int btnY3 = modY + 470;
+  // 5. Return to Library
+  int btnY3 = modY + 540;
   if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY3 &&
       tapY <= btnY3 + btnH)
   {

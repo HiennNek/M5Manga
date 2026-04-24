@@ -87,6 +87,7 @@ static bool drawJpgWithJpegDecFile(LGFX_Sprite& spr, File& file, int x, int y, i
     return false;
 }
 
+
 static bool forceFullMenuRedraw = true;
 
 static uint8_t *jpgBuffer = nullptr;
@@ -435,6 +436,23 @@ const char *contrastPresetName()
   }
 }
 
+const char *fitModeName()
+{
+  switch (fitMode)
+  {
+  case FIT_SCREEN:
+    return "FIT SCREEN";
+  case FIT_WIDTH:
+    return "FIT WIDTH";
+  case FIT_HEIGHT:
+    return "FIT HEIGHT";
+  case FIT_SMART:
+    return "SMART";
+  default:
+    return "UNKNOWN";
+  }
+}
+
 // Standardized modern button helper
 void drawModernButton(LGFX_Sprite &sprite, int x, int y, int w, int h,
                       const char *text, bool isPrimary)
@@ -584,30 +602,85 @@ void preloadPage(int page, int strip)
       if (success)
       {
         nextPageSprite.fillScreen(TFT_WHITE);
-        if (horizontalMode)
+
+        float scale = 1.0f;
+        FitMode effectiveFitMode = fitMode;
+
+        if (effectiveFitMode == FIT_SMART)
         {
-          int stripH = imgH / stripsPerPage;
-          int yStart = strip * stripH;
-          int yEnd = (strip + 1) * stripH;
-          if (strip > 0) yStart -= stripOverlapPx;
-          if (strip < stripsPerPage - 1) yEnd += stripOverlapPx;
-          int actualStripH = yEnd - yStart;
-
-          float scaleX = (float)screenW / (float)imgW;
-          float scaleY = (float)screenH / (float)actualStripH;
-
-          fullPageSprite.setPivot(0, yStart);
-          fullPageSprite.pushRotateZoom(&nextPageSprite, 0, 0, 0, scaleX, scaleY);
+          float imgAspect = (float)imgW / (float)imgH;
+          float screenAspect = (float)screenW / (float)screenH;
+          if (imgAspect > screenAspect * 1.1f || imgH > imgW * 1.5f)
+            effectiveFitMode = FIT_WIDTH;
+          else
+            effectiveFitMode = FIT_SCREEN;
         }
-        else
+
+        if (effectiveFitMode == FIT_SCREEN)
         {
-          float scale = std::min((float)screenW / (float)imgW, (float)screenH / (float)imgH);
+          scale = std::min((float)screenW / imgW, (float)screenH / imgH);
           int outW = (int)(imgW * scale);
           int outH = (int)(imgH * scale);
           int offsetX = (screenW - outW) / 2;
           int offsetY = (screenH - outH) / 2;
-          
+          fullPageSprite.setPivot(imgW / 2, imgH / 2);
           fullPageSprite.pushRotateZoom(&nextPageSprite, offsetX + outW / 2, offsetY + outH / 2, 0, scale, scale);
+        }
+        else if (effectiveFitMode == FIT_WIDTH)
+        {
+          scale = (float)screenW / imgW;
+          int visibleImgH = (int)(screenH / scale);
+          int overlapImg = (int)(stripOverlapPx / scale);
+          if (overlapImg >= visibleImgH)
+            overlapImg = visibleImgH / 2;
+
+          int stepImg = visibleImgH - overlapImg;
+          int localStripsPerPage = (imgH - overlapImg + stepImg - 1) / stepImg;
+          if (localStripsPerPage < 1)
+            localStripsPerPage = 1;
+
+          int localStrip = strip;
+          if (localStrip == -1)
+            localStrip = localStripsPerPage - 1;
+          if (localStrip >= localStripsPerPage)
+            localStrip = localStripsPerPage - 1;
+
+          int yStart = localStrip * stepImg;
+          if (yStart + visibleImgH > imgH)
+            yStart = imgH - visibleImgH;
+          if (yStart < 0)
+            yStart = 0;
+
+          fullPageSprite.setPivot(0, yStart);
+          fullPageSprite.pushRotateZoom(&nextPageSprite, 0, 0, 0, scale, scale);
+        }
+        else if (effectiveFitMode == FIT_HEIGHT)
+        {
+          scale = (float)screenH / imgH;
+          int visibleImgW = (int)(screenW / scale);
+          int overlapImg = (int)(stripOverlapPx / scale);
+          if (overlapImg >= visibleImgW)
+            overlapImg = visibleImgW / 2;
+
+          int stepImg = visibleImgW - overlapImg;
+          int localStripsPerPage = (imgW - overlapImg + stepImg - 1) / stepImg;
+          if (localStripsPerPage < 1)
+            localStripsPerPage = 1;
+
+          int localStrip = strip;
+          if (localStrip == -1)
+            localStrip = localStripsPerPage - 1;
+          if (localStrip >= localStripsPerPage)
+            localStrip = localStripsPerPage - 1;
+
+          int xStart = localStrip * stepImg;
+          if (xStart + visibleImgW > imgW)
+            xStart = imgW - visibleImgW;
+          if (xStart < 0)
+            xStart = 0;
+
+          fullPageSprite.setPivot(xStart, 0);
+          fullPageSprite.pushRotateZoom(&nextPageSprite, 0, 0, 0, scale, scale);
         }
       }
       fullPageSprite.deleteSprite();
@@ -636,6 +709,73 @@ void preloadPage(int page, int strip)
     isNextPageReady = false;
   }
   setCpuFrequencyMhz(80);
+}
+
+static bool drawThumbnail(LGFX_Sprite &spr, File &f, int x, int y, int w, int h)
+{
+  if (jpeg.open(f, drawMCU))
+  {
+    int imgW = jpeg.getWidth();
+    int imgH = jpeg.getHeight();
+
+    int scaleMode = 0; // iOptions: 0=1:1, 1=1:2, 2=1:4, 3=1:8
+    int div = 1;
+
+    if (imgW >= w * 8 && imgH >= h * 8)
+    {
+      scaleMode = JPEG_SCALE_EIGHTH;
+      div = 8;
+    }
+    else if (imgW >= w * 4 && imgH >= h * 4)
+    {
+      scaleMode = JPEG_SCALE_QUARTER;
+      div = 4;
+    }
+    else if (imgW >= w * 2 && imgH >= h * 2)
+    {
+      scaleMode = JPEG_SCALE_HALF;
+      div = 2;
+    }
+
+    int decW = imgW / div;
+    int decH = imgH / div;
+
+    static LGFX_Sprite tempSpr(&M5.Display);
+    prepareSprite(tempSpr, decW, decH, 16, true);
+    if (!tempSpr.getBuffer())
+    {
+      jpeg.close();
+      return false;
+    }
+
+    JpegDrawContext ctx = {&tempSpr, 0, 0, decW, decH};
+    jpeg.setPixelType(RGB565_BIG_ENDIAN);
+    jpeg.setUserPointer(&ctx);
+    bool res = jpeg.decode(0, 0, scaleMode);
+    jpeg.close();
+
+    if (res)
+    {
+      float imgAspect = (float)imgW / (float)imgH;
+      float targetAspect = (float)w / (float)h;
+
+      float finalScale;
+      if (imgAspect > targetAspect)
+      {
+        finalScale = (float)w / decW;
+      }
+      else
+      {
+        finalScale = (float)h / decH;
+      }
+
+      tempSpr.setPivot(decW / 2, decH / 2);
+      tempSpr.pushRotateZoom(&spr, x + w / 2, y + h / 2, 0, finalScale,
+                             finalScale);
+    }
+    return res;
+  }
+  return false;
 }
 
 void drawMenu()
@@ -735,12 +875,8 @@ void drawMenu()
             File coverFile = SD.open(coverPath.c_str());
             if (coverFile)
             {
-              float imgAspect = 540.0f / 960.0f;
-              int scaledW = (int)((THUMB_H - 4) * imgAspect);
-              int xOffset = (THUMB_W - 4 - scaledW) / 2;
-              if (xOffset < 0)
-                xOffset = 0;
-              menuCacheSprite.drawJpg(&coverFile, x + 2 + xOffset, y + 2, THUMB_W - 4, THUMB_H - 4, 0, 0, 0.0f, 0.0f);
+              drawThumbnail(menuCacheSprite, coverFile, x + 2, y + 2,
+                            THUMB_W - 4, THUMB_H - 4);
               coverFile.close();
             }
             else
@@ -1015,7 +1151,7 @@ void drawBookConfig()
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
   int modW = 460;
-  int modH = 560; // Increased height for new button
+  int modH = 640; // Increased height for new buttons
   int modX = (DISPLAY_W - modW) / 2;
   int modY = (DISPLAY_H - modH) / 2;
 
@@ -1073,10 +1209,14 @@ void drawBookConfig()
   String modeMsg = horizontalMode ? "MODE: HORIZONTAL" : "MODE: VERTICAL";
   drawModernButton(gSprite, btnX, btnYMode, btnW, btnH, modeMsg.c_str(), false);
 
-  int btnY2 = modY + 400;
+  int btnYFit = modY + 400;
+  String fitMsg = String("FIT: ") + fitModeName();
+  drawModernButton(gSprite, btnX, btnYFit, btnW, btnH, fitMsg.c_str(), false);
+
+  int btnY2 = modY + 470;
   drawModernButton(gSprite, btnX, btnY2, btnW, btnH, "BOOKMARK PAGE", false);
 
-  int btnY3 = modY + 470;
+  int btnY3 = modY + 540;
   drawModernButton(gSprite, btnX, btnY3, btnW, btnH, "RETURN TO LIBRARY", true);
 
   M5.Display.startWrite();
@@ -1324,30 +1464,86 @@ void drawPage()
         if (decodeSuccess)
         {
           gSprite.fillScreen(TFT_WHITE);
-          if (horizontalMode)
-          {
-            int stripH = imgH / stripsPerPage;
-            int yStart = currentStrip * stripH;
-            int yEnd = (currentStrip + 1) * stripH;
-            if (currentStrip > 0) yStart -= stripOverlapPx;
-            if (currentStrip < stripsPerPage - 1) yEnd += stripOverlapPx;
-            int actualStripH = yEnd - yStart;
 
-            float scaleX = (float)screenW / (float)imgW;
-            float scaleY = (float)screenH / (float)actualStripH;
-            
-            fullPageSprite.setPivot(0, yStart);
-            fullPageSprite.pushRotateZoom(&gSprite, 0, 0, 0, scaleX, scaleY);
-          }
-          else
+          float scale = 1.0f;
+          FitMode effectiveFitMode = fitMode;
+
+          if (effectiveFitMode == FIT_SMART)
           {
-            float scale = std::min((float)screenW / (float)imgW, (float)screenH / (float)imgH);
+            float imgAspect = (float)imgW / (float)imgH;
+            float screenAspect = (float)screenW / (float)screenH;
+            // If image is significantly wider than screen aspect, or very tall, use FIT_WIDTH
+            if (imgAspect > screenAspect * 1.1f || imgH > imgW * 1.5f)
+              effectiveFitMode = FIT_WIDTH;
+            else
+              effectiveFitMode = FIT_SCREEN;
+          }
+
+          if (effectiveFitMode == FIT_SCREEN)
+          {
+            stripsPerPage = 1;
+            currentStrip = 0;
+            scale = std::min((float)screenW / imgW, (float)screenH / imgH);
             int outW = (int)(imgW * scale);
             int outH = (int)(imgH * scale);
             int offsetX = (screenW - outW) / 2;
             int offsetY = (screenH - outH) / 2;
-            
+            fullPageSprite.setPivot(imgW / 2, imgH / 2);
             fullPageSprite.pushRotateZoom(&gSprite, offsetX + outW / 2, offsetY + outH / 2, 0, scale, scale);
+          }
+          else if (effectiveFitMode == FIT_WIDTH)
+          {
+            scale = (float)screenW / imgW;
+            int visibleImgH = (int)(screenH / scale);
+            int overlapImg = (int)(stripOverlapPx / scale);
+            if (overlapImg >= visibleImgH)
+              overlapImg = visibleImgH / 2;
+
+            int stepImg = visibleImgH - overlapImg;
+            stripsPerPage = (imgH - overlapImg + stepImg - 1) / stepImg;
+            if (stripsPerPage < 1)
+              stripsPerPage = 1;
+
+            if (currentStrip == -1)
+              currentStrip = stripsPerPage - 1;
+            if (currentStrip >= stripsPerPage)
+              currentStrip = stripsPerPage - 1;
+
+            int yStart = currentStrip * stepImg;
+            if (yStart + visibleImgH > imgH)
+              yStart = imgH - visibleImgH;
+            if (yStart < 0)
+              yStart = 0;
+
+            fullPageSprite.setPivot(0, yStart);
+            fullPageSprite.pushRotateZoom(&gSprite, 0, 0, 0, scale, scale);
+          }
+          else if (effectiveFitMode == FIT_HEIGHT)
+          {
+            scale = (float)screenH / imgH;
+            int visibleImgW = (int)(screenW / scale);
+            int overlapImg = (int)(stripOverlapPx / scale);
+            if (overlapImg >= visibleImgW)
+              overlapImg = visibleImgW / 2;
+
+            int stepImg = visibleImgW - overlapImg;
+            stripsPerPage = (imgW - overlapImg + stepImg - 1) / stepImg;
+            if (stripsPerPage < 1)
+              stripsPerPage = 1;
+
+            if (currentStrip == -1)
+              currentStrip = stripsPerPage - 1;
+            if (currentStrip >= stripsPerPage)
+              currentStrip = stripsPerPage - 1;
+
+            int xStart = currentStrip * stepImg;
+            if (xStart + visibleImgW > imgW)
+              xStart = imgW - visibleImgW;
+            if (xStart < 0)
+              xStart = 0;
+
+            fullPageSprite.setPivot(xStart, 0);
+            fullPageSprite.pushRotateZoom(&gSprite, 0, 0, 0, scale, scale);
           }
         }
         fullPageSprite.deleteSprite();
@@ -1355,6 +1551,7 @@ void drawPage()
     }
     else
     {
+      if (currentStrip == -1) currentStrip = 0; // Fallback
       // Fallback if jpgBuffer fails (rare)
       decodeSuccess = drawJpgWithJpegDecFile(gSprite, pageFile, 0, 0, screenW, screenH);
       pageFile.close();
@@ -1381,7 +1578,7 @@ void drawPage()
   // 2. Preload NEXT content in background
   int nextPg = currentPage;
   int nextStrip = currentStrip + 1;
-  if (horizontalMode)
+  if (stripsPerPage > 1)
   {
     if (nextStrip >= stripsPerPage)
     {

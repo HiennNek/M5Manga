@@ -181,6 +181,7 @@ void saveProgress()
   prefs.putInt("lastPage", currentPage);
   prefs.putInt("lastStrip", currentStrip);
   prefs.putBool("horizMode", horizontalMode);
+  prefs.putInt("fitMode", (int)fitMode);
   prefs.end();
 }
 
@@ -216,6 +217,7 @@ void loadProgress()
   lastPage = prefs.getInt("lastPage", 0);
   currentStrip = prefs.getInt("lastStrip", 0);
   horizontalMode = prefs.getBool("horizMode", false);
+  fitMode = (FitMode)prefs.getInt("fitMode", (int)FIT_SMART);
   prefs.end();
   updateLastMangaName();
 }

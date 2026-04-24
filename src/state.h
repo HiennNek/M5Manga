@@ -28,6 +28,7 @@ extern bool bookConfigOpen;
 extern int bookConfigPendingPage;
 extern DitherMode ditherMode;
 extern ContrastPreset contrastPreset;
+extern FitMode fitMode;
 extern bool isMagnifierActive;
 extern int magnifierX, magnifierY;
 extern String selectedBookmarkFolder;
