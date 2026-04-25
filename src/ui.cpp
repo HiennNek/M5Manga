@@ -11,6 +11,7 @@
 #include "state.h"
 #include "storage.h"
 #include "wifi_server.h"
+#include "font.h"
 #include <SD.h>
 #include <M5Unified.h>
 #include <algorithm>
@@ -785,7 +786,7 @@ void drawMenu()
   static int drawnLastMenuScroll = -1;
 
   M5.Display.setRotation(0);
-  int totalItems = (int)mangaFolders.size() + 2;
+  int totalItems = (int)mangaFolders.size() + 3; // Bookmarks, Files, Books
   int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
   if (!menuCacheValid || lastDrawnMenuScroll != menuScroll)
@@ -843,7 +844,7 @@ void drawMenu()
             int iconX = x + (THUMB_W - 96) / 2;
             int iconY = y + (THUMB_H - 96) / 2;
             menuCacheSprite.drawBitmap(
-                iconX, iconY, image_book_70dp_1F1F1F_bits, 96, 96, UI_FG);
+                iconX, iconY, bookmarks_material_icon, 96, 96, UI_FG);
             menuCacheSprite.setFont(&fonts::DejaVu12);
             menuCacheSprite.setTextColor(UI_FG, UI_BG);
             menuCacheSprite.setTextDatum(top_center);
@@ -858,7 +859,7 @@ void drawMenu()
             int iconX = x + (THUMB_W - 96) / 2;
             int iconY = y + (THUMB_H - 96) / 2;
             menuCacheSprite.drawBitmap(
-                iconX, iconY, image_drive_folder_upload_70dp_1F1F1F_bits, 96,
+                iconX, iconY, file_material_icon, 96,
                 96, UI_FG);
             menuCacheSprite.setFont(&fonts::DejaVu12);
             menuCacheSprite.setTextColor(UI_FG, UI_BG);
@@ -867,9 +868,25 @@ void drawMenu()
                                        y + THUMB_H + 10);
             menuCacheSprite.setTextDatum(top_left);
           }
+          else if (i == 2)
+          {
+            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20,
+                                          THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+            int iconX = x + (THUMB_W - 96) / 2;
+            int iconY = y + (THUMB_H - 96) / 2;
+            // Use same book icon but maybe a bit different?
+            menuCacheSprite.drawBitmap(
+                iconX, iconY, book_material_icon, 96, 96, UI_FG);
+            menuCacheSprite.setFont(&fonts::DejaVu12);
+            menuCacheSprite.setTextColor(UI_FG, UI_BG);
+            menuCacheSprite.setTextDatum(top_center);
+            menuCacheSprite.drawString("BOOKS", x + THUMB_W / 2,
+                                       y + THUMB_H + 10);
+            menuCacheSprite.setTextDatum(top_left);
+          }
           else
           {
-            int fIdx = i - 2;
+            int fIdx = i - 3;
             String coverPath =
                 makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[fIdx], 0);
             File coverFile = SD.open(coverPath.c_str());
@@ -907,15 +924,23 @@ void drawMenu()
   }
 
   if (menuCacheValid &&
-      (drawnLastMangaName != lastMangaName || drawnLastPage != lastPage ||
+      (drawnLastMangaName != (isLastReadManga ? lastMangaName : currentBookPath) || 
+       drawnLastPage != (isLastReadManga ? lastPage : currentTextPage) ||
        drawnLastMenuScroll != menuScroll))
   {
+    String resumeName = isLastReadManga ? lastMangaName : currentBookPath;
+    int resumePage = isLastReadManga ? lastPage : currentTextPage;
+
+    if (!isLastReadManga && resumeName.length() > 0) {
+        int lastSlash = resumeName.lastIndexOf('/');
+        if (lastSlash >= 0) resumeName = resumeName.substring(lastSlash + 1);
+    }
     int barW = DISPLAY_W - 40;
     int barH = 60;
     int barX = 20;
     int barY = DISPLAY_H - 85;
 
-    if (lastMangaName.length() == 0)
+    if (resumeName.length() == 0)
     {
       menuCacheSprite.fillRect(barX, barY - 2, barW + 4, barH + 4,
                                UI_BG); // Erase shadow + bar
@@ -936,14 +961,14 @@ void drawMenu()
       menuCacheSprite.print("CONTINUE: ");
 
       menuCacheSprite.setFont(&fonts::DejaVu18);
-      String shortName = lastMangaName;
+      String shortName = resumeName;
       if (shortName.length() > 19)
         shortName = shortName.substring(0, 17) + "...";
       menuCacheSprite.print(shortName);
 
       menuCacheSprite.setFont(&fonts::DejaVu12);
       menuCacheSprite.setCursor(barX + 15, barY + 36);
-      menuCacheSprite.printf("Page %d", lastPage + 1);
+      menuCacheSprite.printf("Page %d", resumePage + 1);
 
       // "RESUME" Button
       int btnW = 90;
@@ -952,8 +977,8 @@ void drawMenu()
       int btnY = barY + 10;
       drawModernButton(menuCacheSprite, btnX, btnY, btnW, btnH, "RESUME", true);
     }
-    drawnLastMangaName = lastMangaName;
-    drawnLastPage = lastPage;
+    drawnLastMangaName = isLastReadManga ? lastMangaName : currentBookPath;
+    drawnLastPage = isLastReadManga ? lastPage : currentTextPage;
     drawnLastMenuScroll = menuScroll;
     forceFullMenuRedraw = true;
   }
@@ -1181,7 +1206,14 @@ void drawBookConfig()
   gSprite.print("<<");
   gSprite.setCursor(modX + 115, barY + 25);
   gSprite.print("<");
-  String pg = String(bookConfigPendingPage + 1) + " / " + String(totalPages);
+  String pg;
+  if (appState == STATE_TEXT_READER)
+  {
+    int total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
+    pg = String(bookConfigPendingPage + 1) + " / " + String(total);
+  }
+  else
+    pg = String(bookConfigPendingPage + 1) + " / " + String(totalPages);
   int pgW = pg.length() * 14;
   gSprite.setCursor(modX + (modW - pgW) / 2, barY + 25);
   gSprite.print(pg);
@@ -1196,22 +1228,25 @@ void drawBookConfig()
   int btnX = modX + 30;
   int btnH = 60;
 
-  int btnY0 = modY + 190;
-  String ditherMsg = String("DITHER: ") + ditherModeName();
-  drawModernButton(gSprite, btnX, btnY0, btnW, btnH, ditherMsg.c_str(), false);
+  if (appState != STATE_TEXT_READER)
+  {
+    int btnY0 = modY + 190;
+    String ditherMsg = String("DITHER: ") + ditherModeName();
+    drawModernButton(gSprite, btnX, btnY0, btnW, btnH, ditherMsg.c_str(), false);
 
-  int btnY1 = modY + 260;
-  String contrastMsg = String("CONTRAST: ") + contrastPresetName();
-  drawModernButton(gSprite, btnX, btnY1, btnW, btnH, contrastMsg.c_str(),
-                   false);
+    int btnY1 = modY + 260;
+    String contrastMsg = String("CONTRAST: ") + contrastPresetName();
+    drawModernButton(gSprite, btnX, btnY1, btnW, btnH, contrastMsg.c_str(),
+                     false);
 
-  int btnYMode = modY + 330;
-  String modeMsg = horizontalMode ? "MODE: HORIZONTAL" : "MODE: VERTICAL";
-  drawModernButton(gSprite, btnX, btnYMode, btnW, btnH, modeMsg.c_str(), false);
+    int btnYMode = modY + 330;
+    String modeMsg = horizontalMode ? "MODE: HORIZONTAL" : "MODE: VERTICAL";
+    drawModernButton(gSprite, btnX, btnYMode, btnW, btnH, modeMsg.c_str(), false);
 
-  int btnYFit = modY + 400;
-  String fitMsg = String("FIT: ") + fitModeName();
-  drawModernButton(gSprite, btnX, btnYFit, btnW, btnH, fitMsg.c_str(), false);
+    int btnYFit = modY + 400;
+    String fitMsg = String("FIT: ") + fitModeName();
+    drawModernButton(gSprite, btnX, btnYFit, btnW, btnH, fitMsg.c_str(), false);
+  }
 
   int btnY2 = modY + 470;
   drawModernButton(gSprite, btnX, btnY2, btnW, btnH, "BOOKMARK PAGE", false);
@@ -1609,4 +1644,439 @@ void drawError(const char *msg)
   M5.Display.setCursor(20, 40);
   M5.Display.println(msg);
   M5.Display.display();
+}
+
+void drawBooks()
+{
+  forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
+  prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
+  if (!gSprite.getBuffer())
+    return;
+  gSprite.fillScreen(UI_BG);
+  gSprite.drawLine(0, 80, DISPLAY_W, 80, UI_BORDER);
+  gSprite.setTextColor(UI_FG, UI_BG);
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.setCursor(20, 30);
+  gSprite.print("Books Library");
+
+  int itemsPerPage = (DISPLAY_H - 150) / 80;
+  int totalItems = bookFiles.size();
+
+  if (bookFiles.empty())
+  {
+    gSprite.setTextColor(UI_FG, UI_BG);
+    gSprite.setFont(&fonts::DejaVu18);
+    gSprite.setCursor(40, 150);
+    gSprite.print("No .txt books found in /book");
+  }
+  else
+  {
+    int yOff = 100;
+    int itemH = 70;
+    int count = 0;
+    for (int i = menuScroll; i < (int)bookFiles.size(); i++)
+    {
+      if (count >= itemsPerPage)
+        break;
+
+      gSprite.fillRoundRect(10, yOff, DISPLAY_W - 20, itemH, UI_RADIUS, UI_BG);
+      gSprite.drawRoundRect(10, yOff, DISPLAY_W - 20, itemH, UI_RADIUS, UI_BORDER);
+
+      gSprite.setTextColor(UI_FG, UI_BG);
+      gSprite.setFont(&fonts::DejaVu18);
+      gSprite.setCursor(30, yOff + 25);
+      String t = bookFiles[i];
+      if (t.length() > 30)
+        t = t.substring(0, 27) + "...";
+      gSprite.print(t);
+
+      yOff += itemH + 10;
+      count++;
+    }
+  }
+
+  M5.Display.startWrite();
+  gSprite.pushSprite(0, 0);
+  M5.Display.display();
+  M5.Display.endWrite();
+}
+
+void drawTextPage()
+{
+  M5.Display.setRotation(0);
+  prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
+  if (!gSprite.getBuffer())
+    return;
+
+  gSprite.fillScreen(TFT_WHITE);
+  gSprite.setTextColor(TFT_BLACK);
+  gSprite.setTextWrap(false);
+
+  bool customFontLoaded = false;
+  Serial.println("Applying embedded Literata font...");
+  customFontLoaded = gSprite.loadFont(literata_vlw);
+  if (customFontLoaded)
+    Serial.println("SUCCESS: Literata font applied");
+  else
+    Serial.println("ERROR: Failed to apply embedded font");
+
+  if (!customFontLoaded)
+  {
+    gSprite.setFont(&fonts::DejaVu18);
+  }
+
+  File f = SD.open(currentBookPath.c_str());
+  if (!f)
+  {
+    Serial.printf("ERROR: Failed to open book: %s\n", currentBookPath.c_str());
+    drawError("Failed to open book");
+    return;
+  }
+
+  int leftMargin = 20;
+  int rightMargin = 20;
+  int topMargin = 10;
+  int bottomMargin = 20;
+  int lineH = TEXT_LINE_HEIGHT;
+
+  uint32_t offset = 0;
+
+  // discovery loop: if we want a page we haven't mapped yet, scan forward
+  if (currentTextPage >= (int)textPageOffsets.size())
+  {
+    int maxW = DISPLAY_W - leftMargin - rightMargin;
+    int safetyBuffer = 8;
+    int usableMaxW = maxW - safetyBuffer;
+
+    while (currentTextPage >= (int)textPageOffsets.size() && f.available())
+    {
+      uint32_t pageStart = textPageOffsets.back();
+      f.seek(pageStart);
+      int y = topMargin;
+      bool isNewPara = (pageStart == 0);
+      if (pageStart > 0)
+      {
+        f.seek(pageStart - 1);
+        char prev = f.read();
+            if (prev == '\n' || prev == '\r')
+          isNewPara = true;
+        f.seek(pageStart);
+      }
+
+      while (f.available() && (y + lineH < DISPLAY_H - bottomMargin))
+      {
+        int indent = isNewPara ? 40 : 0;
+        int effectiveMaxW = usableMaxW - indent;
+        bool isParaEnd = false;
+        
+        // This must match the draw loop's word fitting logic exactly
+        String testLine = "";
+        bool hasWords = false;
+
+        while (f.available())
+        {
+          uint32_t wordStartPos = f.position();
+          String word = "";
+          bool hitNewline = false;
+          bool hitSpace = false;
+          
+          while (f.available())
+          {
+            char c = f.read();
+            if (c == '\r') continue;
+            if (c == '\n') { 
+              hitNewline = true; 
+              while (f.available()) { 
+                char next = f.peek(); 
+                if (next == '\n' || next == '\r') f.read(); 
+                else break; 
+              } 
+              break; 
+            }
+            if (c == ' ') { hitSpace = true; break; }
+            word += c;
+          }
+          
+          if (word.length() == 0 && !hitNewline && !hitSpace) break;
+          if (word.length() == 0 && hitSpace) continue;
+
+          if (gSprite.textWidth(testLine + word) > effectiveMaxW)
+          {
+            if (hasWords) {
+              f.seek(wordStartPos);
+              break;
+            } else {
+              // Word break logic for single long word
+              f.seek(wordStartPos);
+              word = "";
+              while (f.available()) {
+                uint32_t charStart = f.position();
+                unsigned char c = f.peek();
+                if (c == ' ' || c == '\n' || c == '\r') break;
+                
+                int charLen = 1;
+                if ((c & 0x80) != 0) {
+                  if ((c & 0xE0) == 0xC0) charLen = 2;
+                  else if ((c & 0xF0) == 0xE0) charLen = 3;
+                  else if ((c & 0xF0) == 0xF0) charLen = 4;
+                }
+                
+                String nextChar = "";
+                for (int j = 0; j < charLen && f.available(); j++) nextChar += (char)f.read();
+                
+                if (gSprite.textWidth(word + nextChar) > effectiveMaxW) {
+                  if (word.length() > 0) f.seek(charStart);
+                  break;
+                }
+                word += nextChar;
+              }
+            }
+          }
+          
+          testLine += word + " ";
+          hasWords = true;
+          
+          if (hitNewline) { isParaEnd = true; break; }
+        }
+        y += lineH;
+        isNewPara = isParaEnd;
+      }
+      
+      uint32_t nextPgStart = f.position();
+      if (nextPgStart < textFileSize) {
+        textPageOffsets.push_back(nextPgStart);
+      } else {
+        break; // Reached end of file
+      }
+      
+      // Smart Math: Refine total page estimate
+      if (textPageOffsets.size() >= 2) {
+          float bytesConsumed = (float)f.position();
+          int pagesScanned = (int)textPageOffsets.size() - 1;
+          if (pagesScanned > 0) {
+              float avg = bytesConsumed / pagesScanned;
+              estimatedTotalPages = (int)(textFileSize / avg);
+          }
+      }
+    }
+    if (currentTextPage >= (int)textPageOffsets.size())
+      currentTextPage = textPageOffsets.size() - 1;
+  }
+
+  if (currentTextPage < (int)textPageOffsets.size())
+  {
+    offset = textPageOffsets[currentTextPage];
+  }
+  f.seek(offset);
+
+  int y = topMargin;
+  int x = leftMargin;
+  int maxW = DISPLAY_W - leftMargin - rightMargin;
+  
+  gSprite.setCursor(x, y);
+  gSprite.setTextDatum(top_left);
+
+  bool isNewParagraph = (offset == 0);
+  if (offset > 0)
+  {
+    // Check if the previous character was a newline to determine if this is a new paragraph
+    f.seek(offset - 1);
+    char prev = f.read();
+    if (prev == '\n' || prev == '\r')
+      isNewParagraph = true;
+    f.seek(offset); // Seek back to the page start
+  }
+
+  // Leave a small safety buffer for font rendering variations
+  int safetyBuffer = 8;
+  int usableMaxW = maxW - safetyBuffer;
+
+  while (f.available() && (y + lineH < DISPLAY_H - bottomMargin))
+  {
+    std::vector<String> words;
+    bool isParagraphEnd = false;
+
+    int indent = isNewParagraph ? 40 : 0;
+    int effectiveMaxW = usableMaxW - indent;
+
+    while (f.available())
+    {
+      uint32_t wordStartPos = f.position();
+      String word = "";
+      bool hitNewline = false;
+      bool hitSpace = false;
+
+      while (f.available())
+      {
+        char c = f.read();
+        if (c == '\r') continue;
+        if (c == '\n') 
+        { 
+          hitNewline = true; 
+          while (f.available()) {
+            char next = f.peek();
+            if (next == '\n' || next == '\r') f.read();
+            else break;
+          }
+          break; 
+        }
+        if (c == ' ') {
+          hitSpace = true;
+          break;
+        }
+        word += c;
+      }
+
+      if (word.length() == 0 && !hitNewline && !hitSpace) break; 
+      
+      if (word.length() == 0 && hitSpace) continue; // Skip empty words from multiple spaces
+
+      // Check if this word fits
+      String testLine = "";
+      for (const auto& w : words) testLine += w + " ";
+      
+      if (gSprite.textWidth(testLine + word) > effectiveMaxW)
+      {
+        if (words.empty()) {
+          // Single word too long. Need to break it.
+          f.seek(wordStartPos);
+          word = "";
+          while (f.available()) {
+            uint32_t charStartPos = f.position();
+            unsigned char c = f.peek();
+            
+            // Check if it's a breakable character
+            if (c == ' ' || c == '\n' || c == '\r') break;
+            
+            int charLen = 1;
+            if ((c & 0x80) != 0) {
+              if ((c & 0xE0) == 0xC0) charLen = 2;
+              else if ((c & 0xF0) == 0xE0) charLen = 3;
+              else if ((c & 0xF0) == 0xF0) charLen = 4;
+            }
+            
+            String nextChar = "";
+            for (int j = 0; j < charLen && f.available(); j++) {
+              nextChar += (char)f.read();
+            }
+            
+            if (gSprite.textWidth(word + nextChar) > effectiveMaxW) {
+              if (word.length() == 0) {
+                word = nextChar; // Take at least one char to avoid infinite loop
+              } else {
+                f.seek(charStartPos);
+              }
+              break;
+            }
+            word += nextChar;
+          }
+          words.push_back(word);
+          isParagraphEnd = false; // We broke a word, definitely not end of paragraph
+        } else {
+          // Word doesn't fit, back up to before this word
+          f.seek(wordStartPos);
+        }
+        break; 
+      }
+
+      words.push_back(word);
+      if (hitNewline) {
+        isParagraphEnd = true;
+        break;
+      }
+    }
+
+    if (words.empty()) {
+      if (isParagraphEnd) isNewParagraph = true;
+      y += lineH;
+      continue;
+    }
+
+    // Draw the line
+    int startX = x + indent;
+    if (isParagraphEnd || words.size() == 1)
+    {
+      String line = "";
+      for (size_t i = 0; i < words.size(); ++i) {
+        line += words[i] + (i == words.size() - 1 ? "" : " ");
+      }
+      gSprite.drawString(line, startX, y);
+    }
+    else
+    {
+      int totalWordsWidth = 0;
+      for (const auto& w : words) totalWordsWidth += gSprite.textWidth(w);
+      
+      float gapWidth = (float)(effectiveMaxW - totalWordsWidth) / (words.size() - 1);
+      float currentXPos = startX;
+      for (size_t i = 0; i < words.size(); ++i)
+      {
+        gSprite.drawString(words[i], (int)currentXPos, y);
+        currentXPos += gSprite.textWidth(words[i]) + gapWidth;
+      }
+    }
+    
+    y += lineH;
+    isNewParagraph = isParagraphEnd;
+  }
+
+  uint32_t nextOffset = f.position();
+  
+  // Record next page offset if not already known
+  if (currentTextPage + 1 == (int)textPageOffsets.size() && nextOffset < (uint32_t)f.size())
+  {
+    textPageOffsets.push_back(nextOffset);
+  }
+  f.close();
+
+  // Draw footer
+  gSprite.setFont(&fonts::DejaVu12);
+  String title = currentBookPath;
+  int lastSlash = title.lastIndexOf('/');
+  if (lastSlash >= 0) title = title.substring(lastSlash + 1);
+  if (title.length() > 40) title = title.substring(0, 37) + "...";
+  
+  gSprite.setCursor(leftMargin, DISPLAY_H - 30);
+  gSprite.print(title);
+
+  gSprite.setTextDatum(top_right);
+  int total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
+  gSprite.drawString("Pg " + String(currentTextPage + 1) + "/" + String(total), DISPLAY_W - rightMargin, DISPLAY_H - 30);
+  gSprite.setTextDatum(top_left);
+
+  M5.Display.startWrite();
+  gSprite.pushSprite(0, 0);
+  M5.Display.display();
+  M5.Display.endWrite();
+}
+
+void openBook(int idx)
+{
+  if (idx < 0 || idx >= (int)bookFiles.size())
+    return;
+  String path = String(BOOK_ROOT) + "/" + bookFiles[idx];
+  openBookPath(path, 0);
+}
+
+void openBookPath(const String &path, int page)
+{
+  currentBookPath = path;
+  currentTextPage = page;
+  textPageOffsets.clear();
+  textPageOffsets.push_back(0);
+
+  File f = SD.open(path.c_str());
+  if (f)
+  {
+    textFileSize = f.size();
+    // Start with a conservative estimate: ~1500 bytes per page
+    estimatedTotalPages = std::max(1, (int)(textFileSize / 1500));
+    f.close();
+  }
+
+  appState = STATE_TEXT_READER;
+  currentEpdMode = epd_mode_t::epd_text;
+  needRedraw = true;
+  saveProgress();
 }

@@ -68,6 +68,42 @@ void scanMangaFolders()
   Serial.printf("Found %d manga folders\n", (int)mangaFolders.size());
   setCpuFrequencyMhz(80);
 }
+ 
+void scanBookFiles()
+{
+  setCpuFrequencyMhz(240);
+  bookFiles.clear();
+ 
+  File root = SD.open(BOOK_ROOT);
+  if (!root || !root.isDirectory())
+  {
+    SD.mkdir(BOOK_ROOT);
+    Serial.println("Created /book directory");
+    return;
+  }
+ 
+  File entry;
+  while ((entry = root.openNextFile()))
+  {
+    if (!entry.isDirectory())
+    {
+      String name = entry.name();
+      if (name.endsWith(".txt") || name.endsWith(".TXT"))
+      {
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0)
+          name = name.substring(slash + 1);
+        bookFiles.push_back(name);
+      }
+    }
+    entry.close();
+  }
+  root.close();
+ 
+  std::sort(bookFiles.begin(), bookFiles.end());
+  Serial.printf("Found %d book files\n", (int)bookFiles.size());
+  setCpuFrequencyMhz(80);
+}
 
 static int findCachedPageCount(const String &folder)
 {
@@ -173,6 +209,9 @@ void saveProgress()
   lastMangaPath = currentMangaPath;
   lastPage = currentPage;
   updateLastMangaName();
+  if (appState == STATE_READER) isLastReadManga = true;
+  else if (appState == STATE_TEXT_READER) isLastReadManga = false;
+  
   if (now - lastSaveMs < 2000)
     return;
   lastSaveMs = now;
@@ -182,6 +221,9 @@ void saveProgress()
   prefs.putInt("lastStrip", currentStrip);
   prefs.putBool("horizMode", horizontalMode);
   prefs.putInt("fitMode", (int)fitMode);
+  prefs.putString("lastBook", currentBookPath);
+  prefs.putInt("lastTextPg", currentTextPage);
+  prefs.putBool("lastIsManga", isLastReadManga);
   prefs.end();
 }
 
@@ -218,6 +260,9 @@ void loadProgress()
   currentStrip = prefs.getInt("lastStrip", 0);
   horizontalMode = prefs.getBool("horizMode", false);
   fitMode = (FitMode)prefs.getInt("fitMode", (int)FIT_SMART);
+  currentBookPath = prefs.getString("lastBook", "");
+  currentTextPage = prefs.getInt("lastTextPg", 0);
+  isLastReadManga = prefs.getBool("lastIsManga", true);
   prefs.end();
   updateLastMangaName();
 }

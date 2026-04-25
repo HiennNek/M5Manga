@@ -32,8 +32,14 @@ static void menuNavigate(int newScroll)
 // Adjust the pending page in book-config by a delta, clamped to valid range
 static void adjustPendingPage(int delta)
 {
+  int maxPg;
+  if (appState == STATE_TEXT_READER)
+    maxPg = std::max((int)textPageOffsets.size(), estimatedTotalPages);
+  else
+    maxPg = totalPages;
+    
   bookConfigPendingPage =
-      std::max(0, std::min(totalPages - 1, bookConfigPendingPage + delta));
+      std::max(0, std::min(maxPg - 1, (int)bookConfigPendingPage + delta));
   requestRedraw();
 }
 
@@ -56,7 +62,8 @@ void handleTouch()
 
   // If a menu is open, we MUST ensure the touch coordinate system matches the menu drawing (Portrait/0)
   if (controlMenuOpen || bookConfigOpen || appState == STATE_MENU || 
-      appState == STATE_BOOKMARKS || appState == STATE_WIFI)
+      appState == STATE_BOOKMARKS || appState == STATE_WIFI || 
+      appState == STATE_BOOKS || appState == STATE_TEXT_READER)
   {
     M5.Display.setRotation(0);
   }
@@ -80,6 +87,10 @@ void handleTouch()
     handleBookmarksTouch(t);
   else if (appState == STATE_WIFI)
     handleWifiTouch(t);
+  else if (appState == STATE_BOOKS)
+    handleBooksTouch(t);
+  else if (appState == STATE_TEXT_READER)
+    handleTextTouch(t);
   else
   {
     // We handle Reader state (including its gestures) in handleReaderTouch
@@ -240,8 +251,16 @@ void handleBookmarksTouch(const m5::touch_detail_t &t)
         {
           // Open bookmark
           flashButton(10, yOff, M5.Display.width() - 20, itemH);
-          String path = String(MANGA_ROOT) + "/" + bookmarks[i].folder;
-          openMangaPath(path, bookmarks[i].page);
+          if (bookmarks[i].folder.endsWith(".txt") || bookmarks[i].folder.endsWith(".TXT"))
+          {
+            String path = String(BOOK_ROOT) + "/" + bookmarks[i].folder;
+            openBookPath(path, bookmarks[i].page);
+          }
+          else
+          {
+            String path = String(MANGA_ROOT) + "/" + bookmarks[i].folder;
+            openMangaPath(path, bookmarks[i].page);
+          }
           return;
         }
       }
@@ -349,7 +368,7 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     return;
   int dy = t.distanceY();
   int dx = t.distanceX();
-  int totalItems = (int)mangaFolders.size() + 2;
+  int totalItems = (int)mangaFolders.size() + 3; // Bookmarks, Files, Books
 
   // Horizontal Swipe Right or Vertical Swipe Down → Next Page
   if (dx > SWIPE_HORIZ_MIN || dy > SWIPE_UP_MIN)
@@ -409,7 +428,14 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     M5.Display.endWrite();
     delay(50);
 
-    openMangaPath(lastMangaPath, lastPage);
+    if (isLastReadManga)
+    {
+      openMangaPath(lastMangaPath, lastPage);
+    }
+    else
+    {
+      openBookPath(currentBookPath, currentTextPage);
+    }
     return;
   }
   if (tapY < GRID_Y_TOP)
@@ -423,8 +449,8 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     col = GRID_COLS - 1;
   if (row < 0)
     row = 0;
-  if (row >= 2)
-    row = 1;
+  if (row >= GRID_ROWS)
+    row = GRID_ROWS - 1;
 
   int idx = menuScroll + (row * GRID_COLS + col);
   if (idx >= totalItems)
@@ -444,9 +470,15 @@ void handleMenuTouch(const m5::touch_detail_t &t)
       appState = STATE_WIFI;
       requestRedraw();
     }
+    else if (idx == 2)
+    {
+      appState = STATE_BOOKS;
+      menuScroll = 0;
+      requestRedraw();
+    }
     else
     {
-      openManga(idx - 2);
+      openManga(idx - 3);
     }
   }
   else
@@ -637,12 +669,26 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   if (tapX < modX || tapX > modX + modW || tapY < modY || tapY > modY + modH)
   {
     bookConfigOpen = false;
-    if (currentPage != bookConfigPendingPage)
+    if (appState == STATE_TEXT_READER)
     {
-      currentPage = bookConfigPendingPage;
-      currentStrip = 0; // Reset strip on page jump
+      if (currentTextPage != bookConfigPendingPage)
+      {
+        currentTextPage = bookConfigPendingPage;
+        requestRedraw(epd_mode_t::epd_text);
+        saveProgress();
+      }
+      else
+        requestRedraw(epd_mode_t::epd_text);
     }
-    requestRedraw(epd_mode_t::epd_quality);
+    else
+    {
+      if (currentPage != bookConfigPendingPage)
+      {
+        currentPage = bookConfigPendingPage;
+        currentStrip = 0; // Reset strip on page jump
+      }
+      requestRedraw(epd_mode_t::epd_quality);
+    }
     return;
   }
 
@@ -726,9 +772,20 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     M5.Display.endWrite();
     delay(50);
 
-    int lastSlash = currentMangaPath.lastIndexOf('/');
-    String folder = currentMangaPath.substring(lastSlash + 1);
-    addBookmark(folder, currentPage);
+    int lastSlash;
+    String folder;
+    if (appState == STATE_TEXT_READER)
+    {
+        lastSlash = currentBookPath.lastIndexOf('/');
+        folder = currentBookPath.substring(lastSlash + 1);
+        addBookmark(folder, currentTextPage);
+    }
+    else
+    {
+        lastSlash = currentMangaPath.lastIndexOf('/');
+        folder = currentMangaPath.substring(lastSlash + 1);
+        addBookmark(folder, currentPage);
+    }
     needRedraw = true;
     return;
   }
@@ -758,3 +815,96 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     return;
   }
 }
+
+void handleBooksTouch(const m5::touch_detail_t &t)
+{
+  if (!t.wasReleased())
+    return;
+
+  int dy = t.distanceY();
+  int totalItems = bookFiles.size();
+  int itemsPerPage = (M5.Display.height() - 150) / 80;
+
+  if (dy < -SWIPE_UP_MIN)
+  {
+    appState = STATE_MENU;
+    menuScroll = 0;
+    requestRedraw();
+    return;
+  }
+
+  if (dy > SWIPE_UP_MIN)
+  {
+    if (menuScroll + itemsPerPage < totalItems)
+      menuScroll += itemsPerPage;
+    else
+      menuScroll = 0;
+    requestRedraw();
+    return;
+  }
+
+  int tapY = t.y;
+  if (tapY < 100)
+    return;
+
+  int idx = menuScroll + (tapY - 100) / 80;
+  if (idx >= 0 && idx < totalItems)
+  {
+    openBook(idx);
+  }
+}
+
+void handleTextTouch(const m5::touch_detail_t &t)
+{
+  if (!t.wasReleased())
+    return;
+
+  int dy = t.distanceY();
+  int dx = t.distanceX();
+  int tapX = t.x;
+  int tapY = t.y;
+  int screenW = M5.Display.width();
+  int screenH = M5.Display.height();
+
+  // 1. Swipe UP from bottom → Open Book Menu
+  if (t.base_y > screenH - 150 && dy < -SWIPE_UP_MIN)
+  {
+    bookConfigOpen = true;
+    bookConfigPendingPage = currentTextPage;
+    requestRedraw();
+    return;
+  }
+
+  // 2. Swipe UP from middle/top → Return to Books library
+  if (dy < -SWIPE_UP_MIN)
+  {
+    appState = STATE_BOOKS;
+    menuScroll = 0;
+    requestRedraw();
+    return;
+  }
+
+  // 3. Taps for page turns
+  int zoneW = screenW / 2;
+  if (tapX > zoneW || dx > SWIPE_HORIZ_MIN)
+  {
+    // Next Page
+    if (currentTextPage + 1 < (int)textPageOffsets.size())
+    {
+      currentTextPage++;
+      requestRedraw(epd_mode_t::epd_text);
+      saveProgress();
+    }
+  }
+  else if (tapX <= zoneW || dx < -SWIPE_HORIZ_MIN)
+  {
+    // Prev Page
+    if (currentTextPage > 0)
+    {
+      currentTextPage--;
+      requestRedraw(epd_mode_t::epd_text);
+      saveProgress();
+    }
+  }
+}
+

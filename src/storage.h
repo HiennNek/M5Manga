@@ -5,6 +5,7 @@
 
 void sdInit();
 void scanMangaFolders();
+void scanBookFiles();
 String makePagePath(const String &folder, int n);
 bool pageExists(const String &folder, int n);
 int findTotalPages(const String &folder);

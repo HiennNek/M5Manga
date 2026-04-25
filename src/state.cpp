@@ -4,13 +4,19 @@
 AppState appState = STATE_MENU;
 std::vector<String> mangaFolders;
 std::vector<int> mangaPageCounts;
+std::vector<String> bookFiles;
 int menuSelected = 0;
 int menuScroll = 0;
 int bookmarkScroll = 0;
 
 String currentMangaPath;
+String currentBookPath = "";
 int totalPages = 0;
 int currentPage = 0;
+int currentTextPage = 0;
+std::vector<uint32_t> textPageOffsets;
+uint32_t textFileSize = 0;
+int estimatedTotalPages = 1;
 bool needRedraw = true;
 bool controlMenuOpen = false;
 bool bookConfigOpen = false;
@@ -36,6 +42,9 @@ bool menuCacheValid = false;
 String lastMangaPath = "";
 int lastPage = 0;
 String lastMangaName = "";
+String lastBookPath = "";
+int lastTextPage = 0;
+bool isLastReadManga = true;
 
 String preloadedMangaPath = "";
 int preloadedPage = -1;

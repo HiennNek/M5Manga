@@ -17,6 +17,7 @@ void setup()
   cfg.internal_spk = false;
   cfg.internal_mic = false;
   cfg.internal_imu = false;
+  cfg.clear_display = false; // Prevent automatic screen clear on boot
   M5.begin(cfg);
 
   // Boost CPU for fast initialization
@@ -40,6 +41,7 @@ void setup()
   // update time. The first real frame will be drawn in loop().
 
   scanMangaFolders();
+  scanBookFiles();
   loadBookmarks();
 
   needRedraw = true;
@@ -72,6 +74,10 @@ void loop()
       drawBookmarks();
     else if (appState == STATE_WIFI)
       drawWifiServer();
+    else if (appState == STATE_BOOKS)
+      drawBooks();
+    else if (appState == STATE_TEXT_READER)
+      drawTextPage();
     else
       drawPage();
     needRedraw = false;

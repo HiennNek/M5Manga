@@ -15,13 +15,19 @@ struct Bookmark
 extern AppState appState;
 extern std::vector<String> mangaFolders;
 extern std::vector<int> mangaPageCounts;
+extern std::vector<String> bookFiles;
 extern int menuSelected;
 extern int menuScroll;
 extern int bookmarkScroll;
 
 extern String currentMangaPath;
+extern String currentBookPath;
 extern int totalPages;
 extern int currentPage;
+extern int currentTextPage;
+extern std::vector<uint32_t> textPageOffsets;
+extern uint32_t textFileSize;
+extern int estimatedTotalPages;
 extern bool needRedraw;
 extern bool controlMenuOpen;
 extern bool bookConfigOpen;
@@ -49,6 +55,9 @@ extern bool menuCacheValid;
 extern String lastMangaPath;
 extern int lastPage;
 extern String lastMangaName;
+extern String lastBookPath;
+extern int lastTextPage;
+extern bool isLastReadManga;
 
 extern String preloadedMangaPath;
 extern int preloadedPage;
