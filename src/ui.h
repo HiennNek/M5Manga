@@ -8,7 +8,6 @@ void drawControlCenter();
 void drawBookConfig();
 void drawBookmarks();
 void drawWifiServer();
-void drawBooks();
 void drawPage();
 void drawTextPage();
 void openBook(int idx);

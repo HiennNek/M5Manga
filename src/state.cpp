@@ -9,6 +9,8 @@ int menuSelected = 0;
 int menuScroll = 0;
 int bookmarkScroll = 0;
 
+MenuTab currentMenuTab = TAB_COMIC;
+
 String currentMangaPath;
 String currentBookPath = "";
 int totalPages = 0;

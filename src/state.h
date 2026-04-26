@@ -12,6 +12,9 @@ struct Bookmark
   int page;
 };
 
+enum MenuTab { TAB_COMIC, TAB_DOCUMENT };
+extern MenuTab currentMenuTab;
+
 extern AppState appState;
 extern std::vector<String> mangaFolders;
 extern std::vector<int> mangaPageCounts;

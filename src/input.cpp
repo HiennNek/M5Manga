@@ -63,7 +63,7 @@ void handleTouch()
   // If a menu is open, we MUST ensure the touch coordinate system matches the menu drawing (Portrait/0)
   if (controlMenuOpen || bookConfigOpen || appState == STATE_MENU || 
       appState == STATE_BOOKMARKS || appState == STATE_WIFI || 
-      appState == STATE_BOOKS || appState == STATE_TEXT_READER)
+      appState == STATE_TEXT_READER)
   {
     M5.Display.setRotation(0);
   }
@@ -87,8 +87,6 @@ void handleTouch()
     handleBookmarksTouch(t);
   else if (appState == STATE_WIFI)
     handleWifiTouch(t);
-  else if (appState == STATE_BOOKS)
-    handleBooksTouch(t);
   else if (appState == STATE_TEXT_READER)
     handleTextTouch(t);
   else
@@ -368,7 +366,31 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     return;
   int dy = t.distanceY();
   int dx = t.distanceX();
-  int totalItems = (int)mangaFolders.size() + 3; // Bookmarks, Files, Books
+
+  int totalItems;
+  if (currentMenuTab == TAB_COMIC)
+    totalItems = (int)mangaFolders.size() + 2;
+  else
+    totalItems = (int)bookFiles.size() + 2;
+
+  // Tab switching (top 80px)
+  if (t.y < 80)
+  {
+    MenuTab oldTab = currentMenuTab;
+    if (t.x < DISPLAY_W / 2)
+      currentMenuTab = TAB_COMIC;
+    else
+      currentMenuTab = TAB_DOCUMENT;
+
+    if (oldTab != currentMenuTab)
+    {
+      menuScroll = 0;
+      menuSelected = -1;
+      menuCacheValid = false;
+      requestRedraw();
+    }
+    return;
+  }
 
   // Horizontal Swipe Right or Vertical Swipe Down → Next Page
   if (dx > SWIPE_HORIZ_MIN || dy > SWIPE_UP_MIN)
@@ -406,7 +428,15 @@ void handleMenuTouch(const m5::touch_detail_t &t)
   int barX = 20;
   int barY = M5.Display.height() - 85;
 
-  if (lastMangaName.length() > 0 && tapX >= barX && tapX <= barX + barW &&
+  String resumeName = isLastReadManga ? lastMangaName : currentBookPath;
+  int resumePage = isLastReadManga ? lastPage : currentTextPage;
+
+  if (!isLastReadManga && resumeName.length() > 0) {
+      int lastSlash = resumeName.lastIndexOf('/');
+      if (lastSlash >= 0) resumeName = resumeName.substring(lastSlash + 1);
+  }
+
+  if (resumeName.length() > 0 && tapX >= barX && tapX <= barX + barW &&
       tapY >= barY && tapY <= barY + barH)
   {
 
@@ -417,13 +447,13 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     M5.Display.setCursor(barX + 15, barY + 12);
     M5.Display.print("CONTINUE: ");
     M5.Display.setFont(&fonts::DejaVu18);
-    String shortName = lastMangaName;
+    String shortName = resumeName;
     if (shortName.length() > 19)
       shortName = shortName.substring(0, 17) + "...";
     M5.Display.print(shortName);
     M5.Display.setFont(&fonts::DejaVu12);
     M5.Display.setCursor(barX + 15, barY + 36);
-    M5.Display.printf("Page %d", lastPage + 1);
+    M5.Display.printf("Page %d", resumePage + 1);
     M5.Display.display();
     M5.Display.endWrite();
     delay(50);
@@ -470,15 +500,12 @@ void handleMenuTouch(const m5::touch_detail_t &t)
       appState = STATE_WIFI;
       requestRedraw();
     }
-    else if (idx == 2)
-    {
-      appState = STATE_BOOKS;
-      menuScroll = 0;
-      requestRedraw();
-    }
     else
     {
-      openManga(idx - 3);
+      if (currentMenuTab == TAB_COMIC)
+        openManga(idx - 2);
+      else
+        openBook(idx - 2);
     }
   }
   else
@@ -661,7 +688,7 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   int tapX = t.x;
   int tapY = t.y;
   int modW = 460;
-  int modH = 640;
+  int modH = (appState == STATE_TEXT_READER) ? 350 : 640;
   int modX = (M5.Display.width() - modW) / 2;
   int modY = (M5.Display.height() - modH) / 2;
 
@@ -711,62 +738,75 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   int btnX = modX + 30;
   int btnH = 60;
 
-  // 1. Dithering Toggle
-  int btnY0 = modY + 190;
-  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY0 &&
-      tapY <= btnY0 + btnH)
+  if (appState != STATE_TEXT_READER)
   {
-    ditherMode = (DitherMode)((ditherMode + 1) % DITHER_COUNT);
-    isNextPageReady = false;
-    requestRedraw();
-    return;
+    // 1. Dithering Toggle
+    int btnY0 = modY + 190;
+    if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY0 &&
+        tapY <= btnY0 + btnH)
+    {
+      ditherMode = (DitherMode)((ditherMode + 1) % DITHER_COUNT);
+      isNextPageReady = false;
+      requestRedraw();
+      return;
+    }
+
+    // 2. Contrast Preset
+    int btnY1 = modY + 260;
+    if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY1 &&
+        tapY <= btnY1 + btnH)
+    {
+      contrastPreset = (ContrastPreset)((contrastPreset + 1) % CONTRAST_COUNT);
+      isNextPageReady = false;
+      requestRedraw();
+      return;
+    }
+
+    // 2.5 Mode Toggle
+    int btnYMode = modY + 330;
+    if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYMode &&
+        tapY <= btnYMode + btnH)
+    {
+      horizontalMode = !horizontalMode;
+      isNextPageReady = false;
+      requestRedraw();
+      return;
+    }
+
+    // 3. FIT Mode Toggle
+    int btnYFit = modY + 400;
+    if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYFit &&
+        tapY <= btnYFit + btnH)
+    {
+      fitMode = (FitMode)((fitMode + 1) % FIT_COUNT);
+      isNextPageReady = false;
+      requestRedraw();
+      return;
+    }
   }
 
-  // 2. Contrast Preset
-  int btnY1 = modY + 260;
-  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY1 &&
-      tapY <= btnY1 + btnH)
+  int btnYBookmark, btnYReturn;
+  if (appState == STATE_TEXT_READER)
   {
-    contrastPreset = (ContrastPreset)((contrastPreset + 1) % CONTRAST_COUNT);
-    isNextPageReady = false;
-    requestRedraw();
-    return;
+    btnYBookmark = modY + 190;
+    btnYReturn = modY + 260;
   }
-
-  // 2.5 Mode Toggle
-  int btnYMode = modY + 330;
-  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYMode &&
-      tapY <= btnYMode + btnH)
+  else
   {
-    horizontalMode = !horizontalMode;
-    isNextPageReady = false;
-    requestRedraw();
-    return;
-  }
-
-  // 3. FIT Mode Toggle
-  int btnYFit = modY + 400;
-  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYFit &&
-      tapY <= btnYFit + btnH)
-  {
-    fitMode = (FitMode)((fitMode + 1) % FIT_COUNT);
-    isNextPageReady = false;
-    requestRedraw();
-    return;
+    btnYBookmark = modY + 470;
+    btnYReturn = modY + 540;
   }
 
   // 4. Bookmark Page
-  int btnY2 = modY + 470;
-  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY2 &&
-      tapY <= btnY2 + btnH)
+  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYBookmark &&
+      tapY <= btnYBookmark + btnH)
   {
-    // ... Bookmark logic
     M5.Display.startWrite();
-    M5.Display.fillRoundRect(btnX, btnY2, btnW, btnH, UI_RADIUS, UI_FG);
+    M5.Display.fillRoundRect(btnX, btnYBookmark, btnW, btnH, UI_RADIUS, UI_FG);
     M5.Display.setTextColor(UI_BG, UI_FG);
     M5.Display.setFont(&fonts::DejaVu18);
     M5.Display.setTextDatum(middle_center);
-    M5.Display.drawString("BOOKMARK SAVED!", btnX + btnW / 2, btnY2 + btnH / 2);
+    M5.Display.drawString("BOOKMARK SAVED!", btnX + btnW / 2, btnYBookmark + btnH / 2);
     M5.Display.setTextDatum(top_left);
     M5.Display.display();
     M5.Display.endWrite();
@@ -791,19 +831,17 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   }
 
   // 5. Return to Library
-  int btnY3 = modY + 540;
-  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY3 &&
-      tapY <= btnY3 + btnH)
+  if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYReturn &&
+      tapY <= btnYReturn + btnH)
   {
-    // Flash with label
     M5.Display.startWrite();
-    M5.Display.fillRoundRect(btnX, btnY3, btnW, btnH, UI_RADIUS, UI_BG);
-    M5.Display.drawRoundRect(btnX, btnY3, btnW, btnH, UI_RADIUS, UI_BORDER);
+    M5.Display.fillRoundRect(btnX, btnYReturn, btnW, btnH, UI_RADIUS, UI_BG);
+    M5.Display.drawRoundRect(btnX, btnYReturn, btnW, btnH, UI_RADIUS, UI_BORDER);
     M5.Display.setTextColor(UI_FG, UI_BG);
     M5.Display.setFont(&fonts::DejaVu18);
     M5.Display.setTextDatum(middle_center);
     M5.Display.drawString("RETURN TO LIBRARY", btnX + btnW / 2,
-                          btnY3 + btnH / 2);
+                          btnYReturn + btnH / 2);
     M5.Display.setTextDatum(top_left);
     M5.Display.display();
     M5.Display.endWrite();
@@ -816,43 +854,7 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   }
 }
 
-void handleBooksTouch(const m5::touch_detail_t &t)
-{
-  if (!t.wasReleased())
-    return;
 
-  int dy = t.distanceY();
-  int totalItems = bookFiles.size();
-  int itemsPerPage = (M5.Display.height() - 150) / 80;
-
-  if (dy < -SWIPE_UP_MIN)
-  {
-    appState = STATE_MENU;
-    menuScroll = 0;
-    requestRedraw();
-    return;
-  }
-
-  if (dy > SWIPE_UP_MIN)
-  {
-    if (menuScroll + itemsPerPage < totalItems)
-      menuScroll += itemsPerPage;
-    else
-      menuScroll = 0;
-    requestRedraw();
-    return;
-  }
-
-  int tapY = t.y;
-  if (tapY < 100)
-    return;
-
-  int idx = menuScroll + (tapY - 100) / 80;
-  if (idx >= 0 && idx < totalItems)
-  {
-    openBook(idx);
-  }
-}
 
 void handleTextTouch(const m5::touch_detail_t &t)
 {
@@ -875,10 +877,11 @@ void handleTextTouch(const m5::touch_detail_t &t)
     return;
   }
 
-  // 2. Swipe UP from middle/top → Return to Books library
+  // 2. Swipe UP from middle/top → Return to library
   if (dy < -SWIPE_UP_MIN)
   {
-    appState = STATE_BOOKS;
+    appState = STATE_MENU;
+    currentMenuTab = TAB_DOCUMENT;
     menuScroll = 0;
     requestRedraw();
     return;

@@ -74,8 +74,6 @@ void loop()
       drawBookmarks();
     else if (appState == STATE_WIFI)
       drawWifiServer();
-    else if (appState == STATE_BOOKS)
-      drawBooks();
     else if (appState == STATE_TEXT_READER)
       drawTextPage();
     else

@@ -786,7 +786,15 @@ void drawMenu()
   static int drawnLastMenuScroll = -1;
 
   M5.Display.setRotation(0);
-  int totalItems = (int)mangaFolders.size() + 3; // Bookmarks, Files, Books
+  
+  // Total items calculation depends on the active tab
+  // Index 0: BOOKMARKS, Index 1: FILES, Index 2+: Content
+  int totalItems;
+  if (currentMenuTab == TAB_COMIC)
+    totalItems = (int)mangaFolders.size() + 2;
+  else
+    totalItems = (int)bookFiles.size() + 2;
+
   int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
   if (!menuCacheValid || lastDrawnMenuScroll != menuScroll)
@@ -795,32 +803,42 @@ void drawMenu()
     if (menuCacheSprite.getBuffer())
     {
       menuCacheSprite.fillScreen(UI_BG);
-      menuCacheSprite.drawLine(0, 80, DISPLAY_W, 80, UI_BORDER);
-      menuCacheSprite.setFont(&fonts::DejaVu24);
-      menuCacheSprite.setTextColor(UI_FG, UI_BG);
-      menuCacheSprite.setCursor(GRID_GUTTER, 30);
-      menuCacheSprite.print("Library");
-
-      menuCacheSprite.setFont(&fonts::DejaVu12);
-      menuCacheSprite.setTextColor(UI_FG, UI_BG);
-      menuCacheSprite.setCursor(GRID_GUTTER, 60);
-      menuCacheSprite.printf("%d titles available", (int)mangaFolders.size());
-
-      if (totalItems > 0)
-      {
-        int curPg = (menuScroll / MENU_VISIBLE) + 1;
-        int maxPg = (totalItems + MENU_VISIBLE - 1) / MENU_VISIBLE;
+      
+      // Draw Tabs
+      int tabW = DISPLAY_W / 2;
+      int tabH = 80;
+      
+      // Comic Tab
+      if (currentMenuTab == TAB_COMIC) {
+        menuCacheSprite.fillRect(0, 0, tabW, tabH, UI_FG);
+        menuCacheSprite.setTextColor(UI_BG, UI_FG);
+      } else {
+        menuCacheSprite.drawRect(0, 0, tabW, tabH, UI_BORDER);
         menuCacheSprite.setTextColor(UI_FG, UI_BG);
-        menuCacheSprite.setCursor(DISPLAY_W - 100, 30);
-        menuCacheSprite.printf("Pg %d/%d", curPg, maxPg);
       }
+      menuCacheSprite.setFont(&fonts::DejaVu24);
+      menuCacheSprite.setTextDatum(middle_center);
+      menuCacheSprite.drawString("Comic", tabW / 2, tabH / 2);
 
-      if (mangaFolders.empty())
+      // Document Tab
+      if (currentMenuTab == TAB_DOCUMENT) {
+        menuCacheSprite.fillRect(tabW, 0, tabW, tabH, UI_FG);
+        menuCacheSprite.setTextColor(UI_BG, UI_FG);
+      } else {
+        menuCacheSprite.drawRect(tabW, 0, tabW, tabH, UI_BORDER);
+        menuCacheSprite.setTextColor(UI_FG, UI_BG);
+      }
+      menuCacheSprite.drawString("Document", tabW + tabW / 2, tabH / 2);
+      
+      menuCacheSprite.setTextDatum(top_left);
+      menuCacheSprite.drawLine(0, tabH, DISPLAY_W, tabH, UI_BORDER);
+
+      if (totalItems == 0 || (currentMenuTab == TAB_COMIC && mangaFolders.empty()) || (currentMenuTab == TAB_DOCUMENT && bookFiles.empty()))
       {
         menuCacheSprite.setFont(&fonts::DejaVu18);
-        menuCacheSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+        menuCacheSprite.setTextColor(UI_FG, UI_BG);
         menuCacheSprite.setCursor(GRID_GUTTER, 120);
-        menuCacheSprite.println("No manga found in /manga/");
+        menuCacheSprite.println(currentMenuTab == TAB_COMIC ? "No manga found in /manga/" : "No books found in /book/");
       }
       else
       {
@@ -832,87 +850,77 @@ void drawMenu()
           int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
           int y = GRID_Y_TOP + row * GRID_ROW_H;
 
-          menuCacheSprite.fillRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS,
-                                        UI_BG);
-          menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS,
-                                        UI_BORDER);
+          menuCacheSprite.fillRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BG);
+          menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BORDER);
 
-          if (i == 0)
+          if (i == 0) // BOOKMARKS
           {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20,
-                                          THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
             int iconX = x + (THUMB_W - 96) / 2;
             int iconY = y + (THUMB_H - 96) / 2;
-            menuCacheSprite.drawBitmap(
-                iconX, iconY, bookmarks_material_icon, 96, 96, UI_FG);
+            menuCacheSprite.drawBitmap(iconX, iconY, bookmarks_material_icon, 96, 96, UI_FG);
             menuCacheSprite.setFont(&fonts::DejaVu12);
             menuCacheSprite.setTextColor(UI_FG, UI_BG);
             menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
+            menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2, y + THUMB_H + 10);
             menuCacheSprite.setTextDatum(top_left);
           }
-          else if (i == 1)
+          else if (i == 1) // FILES (WiFi Server)
           {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20,
-                                          THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
             int iconX = x + (THUMB_W - 96) / 2;
             int iconY = y + (THUMB_H - 96) / 2;
-            menuCacheSprite.drawBitmap(
-                iconX, iconY, file_material_icon, 96,
-                96, UI_FG);
+            menuCacheSprite.drawBitmap(iconX, iconY, file_material_icon, 96, 96, UI_FG);
             menuCacheSprite.setFont(&fonts::DejaVu12);
             menuCacheSprite.setTextColor(UI_FG, UI_BG);
             menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("FILES", x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
+            menuCacheSprite.drawString("FILES", x + THUMB_W / 2, y + THUMB_H + 10);
             menuCacheSprite.setTextDatum(top_left);
           }
-          else if (i == 2)
+          else // Content
           {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20,
-                                          THUMB_H - 20, UI_RADIUS, UI_ACCENT);
-            int iconX = x + (THUMB_W - 96) / 2;
-            int iconY = y + (THUMB_H - 96) / 2;
-            // Use same book icon but maybe a bit different?
-            menuCacheSprite.drawBitmap(
-                iconX, iconY, book_material_icon, 96, 96, UI_FG);
-            menuCacheSprite.setFont(&fonts::DejaVu12);
-            menuCacheSprite.setTextColor(UI_FG, UI_BG);
-            menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("BOOKS", x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
-            menuCacheSprite.setTextDatum(top_left);
-          }
-          else
-          {
-            int fIdx = i - 3;
-            String coverPath =
-                makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[fIdx], 0);
-            File coverFile = SD.open(coverPath.c_str());
-            if (coverFile)
+            int cIdx = i - 2;
+            if (currentMenuTab == TAB_COMIC)
             {
-              drawThumbnail(menuCacheSprite, coverFile, x + 2, y + 2,
-                            THUMB_W - 4, THUMB_H - 4);
-              coverFile.close();
-            }
-            else
-            {
-              menuCacheSprite.setTextColor(UI_FG, UI_BG);
+              String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[cIdx], 0);
+              File coverFile = SD.open(coverPath.c_str());
+              if (coverFile)
+              {
+                drawThumbnail(menuCacheSprite, coverFile, x + 2, y + 2, THUMB_W - 4, THUMB_H - 4);
+                coverFile.close();
+              }
+              else
+              {
+                menuCacheSprite.setTextColor(UI_FG, UI_BG);
+                menuCacheSprite.setFont(&fonts::DejaVu12);
+                menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
+                menuCacheSprite.print("NO COVER");
+              }
+              String title = mangaFolders[cIdx];
+              if (title.length() > 22) title = title.substring(0, 20) + "...";
+              
               menuCacheSprite.setFont(&fonts::DejaVu12);
-              menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
-              menuCacheSprite.print("NO COVER");
+              menuCacheSprite.setTextColor(UI_FG, UI_BG);
+              menuCacheSprite.setTextDatum(top_center);
+              menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+              menuCacheSprite.setTextDatum(top_left);
             }
-            menuCacheSprite.setFont(&fonts::DejaVu12);
-            menuCacheSprite.setTextColor(UI_FG, UI_BG);
-            String title = mangaFolders[fIdx];
-            if (title.length() > 22)
-              title = title.substring(0, 20) + "...";
+            else // TAB_DOCUMENT
+            {
+              menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+              int iconX = x + (THUMB_W - 96) / 2;
+              int iconY = y + (THUMB_H - 96) / 2;
+              menuCacheSprite.drawBitmap(iconX, iconY, book_material_icon, 96, 96, UI_FG);
+              
+              String title = bookFiles[cIdx];
+              if (title.length() > 22) title = title.substring(0, 20) + "...";
 
-            menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString(title, x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
-            menuCacheSprite.setTextDatum(top_left);
+              menuCacheSprite.setFont(&fonts::DejaVu12);
+              menuCacheSprite.setTextColor(UI_FG, UI_BG);
+              menuCacheSprite.setTextDatum(top_center);
+              menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+              menuCacheSprite.setTextDatum(top_left);
+            }
           }
         }
       }
@@ -1176,7 +1184,7 @@ void drawBookConfig()
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
   int modW = 460;
-  int modH = 640; // Increased height for new buttons
+  int modH = (appState == STATE_TEXT_READER) ? 350 : 640;
   int modX = (DISPLAY_W - modW) / 2;
   int modY = (DISPLAY_H - modH) / 2;
 
@@ -1228,6 +1236,8 @@ void drawBookConfig()
   int btnX = modX + 30;
   int btnH = 60;
 
+  int btnYBookmark, btnYReturn;
+
   if (appState != STATE_TEXT_READER)
   {
     int btnY0 = modY + 190;
@@ -1246,13 +1256,18 @@ void drawBookConfig()
     int btnYFit = modY + 400;
     String fitMsg = String("FIT: ") + fitModeName();
     drawModernButton(gSprite, btnX, btnYFit, btnW, btnH, fitMsg.c_str(), false);
+
+    btnYBookmark = modY + 470;
+    btnYReturn = modY + 540;
+  }
+  else
+  {
+    btnYBookmark = modY + 190;
+    btnYReturn = modY + 260;
   }
 
-  int btnY2 = modY + 470;
-  drawModernButton(gSprite, btnX, btnY2, btnW, btnH, "BOOKMARK PAGE", false);
-
-  int btnY3 = modY + 540;
-  drawModernButton(gSprite, btnX, btnY3, btnW, btnH, "RETURN TO LIBRARY", true);
+  drawModernButton(gSprite, btnX, btnYBookmark, btnW, btnH, "BOOKMARK PAGE", false);
+  drawModernButton(gSprite, btnX, btnYReturn, btnW, btnH, "RETURN TO LIBRARY", true);
 
   M5.Display.startWrite();
   gSprite.pushSprite(0, 0, TFT_MAGENTA);
@@ -1646,60 +1661,133 @@ void drawError(const char *msg)
   M5.Display.display();
 }
 
-void drawBooks()
-{
-  forceFullMenuRedraw = true;
-  M5.Display.setRotation(0);
-  prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
-  if (!gSprite.getBuffer())
-    return;
-  gSprite.fillScreen(UI_BG);
-  gSprite.drawLine(0, 80, DISPLAY_W, 80, UI_BORDER);
-  gSprite.setTextColor(UI_FG, UI_BG);
-  gSprite.setFont(&fonts::DejaVu24);
-  gSprite.setCursor(20, 30);
-  gSprite.print("Books Library");
 
-  int itemsPerPage = (DISPLAY_H - 150) / 80;
-  int totalItems = bookFiles.size();
 
-  if (bookFiles.empty())
-  {
-    gSprite.setTextColor(UI_FG, UI_BG);
-    gSprite.setFont(&fonts::DejaVu18);
-    gSprite.setCursor(40, 150);
-    gSprite.print("No .txt books found in /book");
+// ── Buffered Text Reader ─────────────────────────────────────────────
+// Reads from a PSRAM buffer instead of per-byte SD I/O.
+// Supports virtual "position" tracking so word-break / seek logic stays identical.
+
+#define TEXT_BUF_SIZE 16384  // 16 KB chunk
+
+struct BufferedReader {
+  File* file;
+  uint8_t* buf;
+  uint32_t bufStart;   // file offset of buf[0]
+  int bufLen;          // valid bytes in buf
+  uint32_t pos;        // current virtual file position
+  uint32_t fileSize;
+
+  BufferedReader() : file(nullptr), buf(nullptr), bufStart(0), bufLen(0), pos(0), fileSize(0) {}
+  ~BufferedReader() { end(); }
+
+  bool begin(File& f) {
+    file = &f;
+    fileSize = f.size();
+    buf = (uint8_t*)heap_caps_malloc(TEXT_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    if (!buf) return false;
+    bufStart = 0;
+    bufLen = 0;
+    pos = 0;
+    return true;
   }
-  else
-  {
-    int yOff = 100;
-    int itemH = 70;
-    int count = 0;
-    for (int i = menuScroll; i < (int)bookFiles.size(); i++)
-    {
-      if (count >= itemsPerPage)
-        break;
 
-      gSprite.fillRoundRect(10, yOff, DISPLAY_W - 20, itemH, UI_RADIUS, UI_BG);
-      gSprite.drawRoundRect(10, yOff, DISPLAY_W - 20, itemH, UI_RADIUS, UI_BORDER);
+  void end() {
+    if (buf) { heap_caps_free(buf); buf = nullptr; }
+  }
 
-      gSprite.setTextColor(UI_FG, UI_BG);
-      gSprite.setFont(&fonts::DejaVu18);
-      gSprite.setCursor(30, yOff + 25);
-      String t = bookFiles[i];
-      if (t.length() > 30)
-        t = t.substring(0, 27) + "...";
-      gSprite.print(t);
+  void fillBuffer() {
+    if (!file || !buf) return;
+    file->seek(pos);
+    bufStart = pos;
+    bufLen = file->read(buf, TEXT_BUF_SIZE);
+  }
 
-      yOff += itemH + 10;
-      count++;
+  // Ensure current pos is within the buffer
+  inline void ensureBuffered() {
+    if (pos < bufStart || pos >= bufStart + (uint32_t)bufLen) {
+      fillBuffer();
     }
   }
 
-  M5.Display.startWrite();
-  gSprite.pushSprite(0, 0);
-  M5.Display.display();
-  M5.Display.endWrite();
+  bool available() { return pos < fileSize; }
+
+  uint32_t position() { return pos; }
+
+  void seek(uint32_t p) { pos = p; }
+
+  char read() {
+    ensureBuffered();
+    if (bufLen <= 0) return 0;
+    return (char)buf[pos++ - bufStart];
+  }
+
+  char peek() {
+    ensureBuffered();
+    if (bufLen <= 0) return 0;
+    return (char)buf[pos - bufStart];
+  }
+};
+
+// ── Text Page Index Persistence ──────────────────────────────────────
+// Format: [4B magic][4B fileSize][4B count][count × 4B offsets]
+
+static const uint32_t TEXT_IDX_MAGIC = 0x54585449; // "TXTI"
+
+static String makeIdxPath(const String& bookPath) {
+  // Replace .txt/.TXT with .idx
+  String idx = bookPath;
+  int dot = idx.lastIndexOf('.');
+  if (dot >= 0) idx = idx.substring(0, dot);
+  idx += ".idx";
+  return idx;
+}
+
+static bool loadTextIndex(const String& bookPath) {
+  String idxPath = makeIdxPath(bookPath);
+  File f = SD.open(idxPath.c_str(), FILE_READ);
+  if (!f) return false;
+
+  uint32_t magic, savedSize, count;
+  if (f.read((uint8_t*)&magic, 4) != 4 || magic != TEXT_IDX_MAGIC) { f.close(); return false; }
+  if (f.read((uint8_t*)&savedSize, 4) != 4 || savedSize != textFileSize) { f.close(); return false; }
+  if (f.read((uint8_t*)&count, 4) != 4 || count == 0 || count > 100000) { f.close(); return false; }
+
+  textPageOffsets.clear();
+  textPageOffsets.resize(count);
+  size_t bytesNeeded = count * 4;
+  if (f.read((uint8_t*)textPageOffsets.data(), bytesNeeded) != bytesNeeded) {
+    textPageOffsets.clear();
+    textPageOffsets.push_back(0);
+    f.close();
+    return false;
+  }
+  f.close();
+
+  // Sanity: first offset must be 0
+  if (textPageOffsets[0] != 0) {
+    textPageOffsets.clear();
+    textPageOffsets.push_back(0);
+    return false;
+  }
+
+  Serial.printf("Loaded text index: %d pages from %s\n", (int)count, idxPath.c_str());
+  estimatedTotalPages = std::max((int)count, estimatedTotalPages);
+  return true;
+}
+
+static void saveTextIndex(const String& bookPath) {
+  String idxPath = makeIdxPath(bookPath);
+  File f = SD.open(idxPath.c_str(), FILE_WRITE);
+  if (!f) { Serial.println("Failed to save text index"); return; }
+
+  uint32_t magic = TEXT_IDX_MAGIC;
+  uint32_t count = textPageOffsets.size();
+  f.write((uint8_t*)&magic, 4);
+  f.write((uint8_t*)&textFileSize, 4);
+  f.write((uint8_t*)&count, 4);
+  f.write((uint8_t*)textPageOffsets.data(), count * 4);
+  f.close();
+  Serial.printf("Saved text index: %d pages to %s\n", (int)count, idxPath.c_str());
 }
 
 void drawTextPage()
@@ -1743,28 +1831,52 @@ void drawTextPage()
   uint32_t offset = 0;
 
   // discovery loop: if we want a page we haven't mapped yet, scan forward
+  // Uses buffered reader for 10-20x faster scanning vs per-byte SD reads
   if (currentTextPage >= (int)textPageOffsets.size())
   {
+    setCpuFrequencyMhz(240);
     int maxW = DISPLAY_W - leftMargin - rightMargin;
     int safetyBuffer = 8;
     int usableMaxW = maxW - safetyBuffer;
 
-    while (currentTextPage >= (int)textPageOffsets.size() && f.available())
+    BufferedReader br;
+    bool buffered = br.begin(f);
+
+    while (currentTextPage >= (int)textPageOffsets.size())
     {
       uint32_t pageStart = textPageOffsets.back();
-      f.seek(pageStart);
+      if (pageStart >= textFileSize) break;
+
+      if (buffered) {
+        br.seek(pageStart);
+      } else {
+        f.seek(pageStart);
+      }
       int y = topMargin;
       bool isNewPara = (pageStart == 0);
       if (pageStart > 0)
       {
-        f.seek(pageStart - 1);
-        char prev = f.read();
-            if (prev == '\n' || prev == '\r')
-          isNewPara = true;
-        f.seek(pageStart);
+        if (buffered) {
+          br.seek(pageStart - 1);
+          char prev = br.read();
+          if (prev == '\n' || prev == '\r') isNewPara = true;
+          br.seek(pageStart);
+        } else {
+          f.seek(pageStart - 1);
+          char prev = f.read();
+          if (prev == '\n' || prev == '\r') isNewPara = true;
+          f.seek(pageStart);
+        }
       }
 
-      while (f.available() && (y + lineH < DISPLAY_H - bottomMargin))
+      // Macro-style lambdas for buffered/unbuffered access
+      #define BR_AVAILABLE() (buffered ? br.available() : (bool)f.available())
+      #define BR_READ()      (buffered ? br.read() : (char)f.read())
+      #define BR_PEEK()      (buffered ? br.peek() : (char)f.peek())
+      #define BR_POS()       (buffered ? br.position() : (uint32_t)f.position())
+      #define BR_SEEK(p)     do { if (buffered) br.seek(p); else f.seek(p); } while(0)
+
+      while (BR_AVAILABLE() && (y + lineH < DISPLAY_H - bottomMargin))
       {
         int indent = isNewPara ? 40 : 0;
         int effectiveMaxW = usableMaxW - indent;
@@ -1774,22 +1886,22 @@ void drawTextPage()
         String testLine = "";
         bool hasWords = false;
 
-        while (f.available())
+        while (BR_AVAILABLE())
         {
-          uint32_t wordStartPos = f.position();
+          uint32_t wordStartPos = BR_POS();
           String word = "";
           bool hitNewline = false;
           bool hitSpace = false;
           
-          while (f.available())
+          while (BR_AVAILABLE())
           {
-            char c = f.read();
+            char c = BR_READ();
             if (c == '\r') continue;
             if (c == '\n') { 
               hitNewline = true; 
-              while (f.available()) { 
-                char next = f.peek(); 
-                if (next == '\n' || next == '\r') f.read(); 
+              while (BR_AVAILABLE()) { 
+                char next = BR_PEEK(); 
+                if (next == '\n' || next == '\r') BR_READ(); 
                 else break; 
               } 
               break; 
@@ -1804,15 +1916,15 @@ void drawTextPage()
           if (gSprite.textWidth(testLine + word) > effectiveMaxW)
           {
             if (hasWords) {
-              f.seek(wordStartPos);
+              BR_SEEK(wordStartPos);
               break;
             } else {
               // Word break logic for single long word
-              f.seek(wordStartPos);
+              BR_SEEK(wordStartPos);
               word = "";
-              while (f.available()) {
-                uint32_t charStart = f.position();
-                unsigned char c = f.peek();
+              while (BR_AVAILABLE()) {
+                uint32_t charStart = BR_POS();
+                unsigned char c = BR_PEEK();
                 if (c == ' ' || c == '\n' || c == '\r') break;
                 
                 int charLen = 1;
@@ -1823,14 +1935,22 @@ void drawTextPage()
                 }
                 
                 String nextChar = "";
-                for (int j = 0; j < charLen && f.available(); j++) nextChar += (char)f.read();
+                for (int j = 0; j < charLen && BR_AVAILABLE(); j++) nextChar += (char)BR_READ();
                 
                 if (gSprite.textWidth(word + nextChar) > effectiveMaxW) {
-                  if (word.length() > 0) f.seek(charStart);
+                  if (word.length() == 0) {
+                    word = nextChar; // Take at least one char to avoid infinite loop
+                  } else {
+                    BR_SEEK(charStart);
+                  }
                   break;
                 }
                 word += nextChar;
               }
+              testLine += word + " ";
+              hasWords = true;
+              isParaEnd = false;
+              break;
             }
           }
           
@@ -1843,7 +1963,7 @@ void drawTextPage()
         isNewPara = isParaEnd;
       }
       
-      uint32_t nextPgStart = f.position();
+      uint32_t nextPgStart = BR_POS();
       if (nextPgStart < textFileSize) {
         textPageOffsets.push_back(nextPgStart);
       } else {
@@ -1852,16 +1972,29 @@ void drawTextPage()
       
       // Smart Math: Refine total page estimate
       if (textPageOffsets.size() >= 2) {
-          float bytesConsumed = (float)f.position();
+          float bytesConsumed = (float)nextPgStart;
           int pagesScanned = (int)textPageOffsets.size() - 1;
           if (pagesScanned > 0) {
               float avg = bytesConsumed / pagesScanned;
               estimatedTotalPages = (int)(textFileSize / avg);
           }
       }
+
+      #undef BR_AVAILABLE
+      #undef BR_READ
+      #undef BR_PEEK
+      #undef BR_POS
+      #undef BR_SEEK
     }
+
+    br.end();
+
     if (currentTextPage >= (int)textPageOffsets.size())
       currentTextPage = textPageOffsets.size() - 1;
+
+    // Persist the discovered offsets for next time
+    saveTextIndex(currentBookPath);
+    setCpuFrequencyMhz(80);
   }
 
   if (currentTextPage < (int)textPageOffsets.size())
@@ -2027,22 +2160,15 @@ void drawTextPage()
   if (currentTextPage + 1 == (int)textPageOffsets.size() && nextOffset < (uint32_t)f.size())
   {
     textPageOffsets.push_back(nextOffset);
+    // Persist updated index incrementally
+    saveTextIndex(currentBookPath);
   }
   f.close();
 
   // Draw footer
   gSprite.setFont(&fonts::DejaVu12);
-  String title = currentBookPath;
-  int lastSlash = title.lastIndexOf('/');
-  if (lastSlash >= 0) title = title.substring(lastSlash + 1);
-  if (title.length() > 40) title = title.substring(0, 37) + "...";
-  
-  gSprite.setCursor(leftMargin, DISPLAY_H - 30);
-  gSprite.print(title);
-
-  gSprite.setTextDatum(top_right);
-  int total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
-  gSprite.drawString("Pg " + String(currentTextPage + 1) + "/" + String(total), DISPLAY_W - rightMargin, DISPLAY_H - 30);
+  gSprite.setTextDatum(top_center);
+  gSprite.drawString(String(currentTextPage + 1), DISPLAY_W / 2, DISPLAY_H - 30);
   gSprite.setTextDatum(top_left);
 
   M5.Display.startWrite();
@@ -2073,6 +2199,12 @@ void openBookPath(const String &path, int page)
     // Start with a conservative estimate: ~1500 bytes per page
     estimatedTotalPages = std::max(1, (int)(textFileSize / 1500));
     f.close();
+  }
+
+  // Try to load cached page index for instant bookmark jumps
+  if (loadTextIndex(path)) {
+    Serial.printf("Text index loaded: %d pages cached, jumping to page %d\n",
+                  (int)textPageOffsets.size(), page);
   }
 
   appState = STATE_TEXT_READER;

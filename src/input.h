@@ -5,7 +5,6 @@
 void handleTouch();
 void handleMenuTouch(const m5::touch_detail_t &t);
 void handleBookmarksTouch(const m5::touch_detail_t &t);
-void handleBooksTouch(const m5::touch_detail_t &t);
 void handleTextTouch(const m5::touch_detail_t &t);
 void handleWifiTouch(const m5::touch_detail_t &t);
 void handleReaderTouch(const m5::touch_detail_t &t);
