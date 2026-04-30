@@ -26,6 +26,8 @@
 // Manga root
 #define MANGA_ROOT "/manga"
 #define PIC_ROOT "/pic"
+#define BOOK_ROOT "/book"
+#define TEXT_LINE_HEIGHT 36 // Recommended for ~24-28px fonts
 
 // Filename pattern
 #define IMG_PREFIX "m5_"
@@ -33,13 +35,14 @@
 #define IMG_DIGITS 4
 
 // Menu layout
-#define GRID_COLS 2
+#define GRID_COLS 3
+#define GRID_ROWS 3
 #define GRID_GUTTER 30
 #define GRID_Y_TOP 110
 #define THUMB_W ((DISPLAY_W - (GRID_COLS + 1) * GRID_GUTTER) / GRID_COLS)
 #define THUMB_H (int(THUMB_W * 1.41))
 #define GRID_ROW_H (THUMB_H + 60)
-#define MENU_VISIBLE (GRID_COLS * 2)
+#define MENU_VISIBLE (GRID_COLS * GRID_ROWS)
 #define UI_RADIUS 8
 
 // High-contrast UI colors
@@ -76,10 +79,28 @@ enum ContrastPreset
   CONTRAST_COUNT  // Must be last — used for cycling
 };
 
+enum FitMode
+{
+  FIT_SCREEN, // Fits entire image to screen
+  FIT_WIDTH,  // Fits width to screen, scrolls vertically if needed
+  FIT_HEIGHT, // Fits height to screen, scrolls horizontally if needed
+  FIT_SMART,  // Auto-detect based on image aspect ratio
+  FIT_COUNT
+};
+
 enum AppState
 {
   STATE_MENU,
   STATE_READER,
   STATE_BOOKMARKS,
-  STATE_WIFI
+  STATE_WIFI,
+  STATE_TEXT_READER
+};
+
+enum OrientationMode
+{
+  ORIENT_PORTRAIT,
+  ORIENT_LANDSCAPE,
+  ORIENT_AUTO,
+  ORIENT_COUNT
 };

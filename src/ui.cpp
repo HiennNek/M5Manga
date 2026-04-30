@@ -11,10 +11,83 @@
 #include "state.h"
 #include "storage.h"
 #include "wifi_server.h"
+#include "font.h"
 #include <SD.h>
 #include <M5Unified.h>
 #include <algorithm>
 #include <esp_heap_caps.h>
+#include <JPEGDEC.h>
+
+static JPEGDEC jpeg;
+
+struct JpegDrawContext {
+    LGFX_Sprite* spr;
+    int offsetX;
+    int offsetY;
+    int maxWidth;
+    int maxHeight;
+};
+
+static int drawMCU(JPEGDRAW *pDraw) {
+    JpegDrawContext* ctx = (JpegDrawContext*)pDraw->pUser;
+    LGFX_Sprite* spr = ctx->spr;
+    uint16_t* pixels = (uint16_t*)pDraw->pPixels;
+    uint16_t* sprBuffer = (uint16_t*)spr->getBuffer();
+    
+    int sprWidth = spr->width();
+    int sprHeight = spr->height();
+    
+    int cx = pDraw->x;
+    int cy = pDraw->y;
+    int cw = pDraw->iWidth;
+    int ch = pDraw->iHeight;
+    
+    if (ctx->maxWidth > 0 && cx + cw > ctx->maxWidth) cw = ctx->maxWidth - cx;
+    if (ctx->maxHeight > 0 && cy + ch > ctx->maxHeight) ch = ctx->maxHeight - cy;
+    if (cw <= 0 || ch <= 0) return 1;
+
+    int outX = cx + ctx->offsetX;
+    int outY = cy + ctx->offsetY;
+
+    if (outX >= sprWidth || outY >= sprHeight) return 1;
+    if (outX < 0) { cw += outX; outX = 0; }
+    if (outY < 0) { ch += outY; outY = 0; }
+    if (outX + cw > sprWidth) cw = sprWidth - outX;
+    if (outY + ch > sprHeight) ch = sprHeight - outY;
+
+    if (cw <= 0 || ch <= 0) return 1;
+
+    for (int y = 0; y < ch; y++) {
+        memcpy(&sprBuffer[(outY + y) * sprWidth + outX], &pixels[y * pDraw->iWidth], cw * 2);
+    }
+    
+    return 1;
+}
+
+static bool drawJpgWithJpegDec(LGFX_Sprite& spr, uint8_t* buf, size_t size, int x, int y, int maxWidth, int maxHeight) {
+    JpegDrawContext ctx = {&spr, x, y, maxWidth, maxHeight};
+    if (jpeg.openRAM(buf, size, drawMCU)) {
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.setUserPointer(&ctx);
+        bool res = jpeg.decode(0, 0, 0);
+        jpeg.close();
+        return res;
+    }
+    return false;
+}
+
+static bool drawJpgWithJpegDecFile(LGFX_Sprite& spr, File& file, int x, int y, int maxWidth, int maxHeight) {
+    JpegDrawContext ctx = {&spr, x, y, maxWidth, maxHeight};
+    if (jpeg.open(file, drawMCU)) {
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.setUserPointer(&ctx);
+        bool res = jpeg.decode(0, 0, 0);
+        jpeg.close();
+        return res;
+    }
+    return false;
+}
+
 
 static bool forceFullMenuRedraw = true;
 
@@ -364,6 +437,23 @@ const char *contrastPresetName()
   }
 }
 
+const char *fitModeName()
+{
+  switch (fitMode)
+  {
+  case FIT_SCREEN:
+    return "FIT SCREEN";
+  case FIT_WIDTH:
+    return "FIT WIDTH";
+  case FIT_HEIGHT:
+    return "FIT HEIGHT";
+  case FIT_SMART:
+    return "SMART";
+  default:
+    return "UNKNOWN";
+  }
+}
+
 // Standardized modern button helper
 void drawModernButton(LGFX_Sprite &sprite, int x, int y, int w, int h,
                       const char *text, bool isPrimary)
@@ -455,14 +545,14 @@ void resetMagnifierTracking()
   lastOutY = -1;
 }
 
-void preloadPage(int page)
+void preloadPage(int page, int strip)
 {
   if (page < 0 || page >= totalPages)
   {
     isNextPageReady = false;
     return;
   }
-  if (isNextPageReady && preloadedPage == page &&
+  if (isNextPageReady && preloadedPage == page && preloadedStrip == strip &&
       preloadedMangaPath == currentMangaPath)
   {
     return;
@@ -471,7 +561,11 @@ void preloadPage(int page)
   setCpuFrequencyMhz(240);
   String path = makePagePath(currentMangaPath, page);
 
-  prepareSprite(nextPageSprite, DISPLAY_W, DISPLAY_H, 16, true);
+  int rot = getActiveRotation();
+  int screenW = (rot % 2 == 1) ? 960 : 540;
+  int screenH = (rot % 2 == 1) ? 540 : 960;
+
+  prepareSprite(nextPageSprite, screenW, screenH, 16, true);
   if (!nextPageSprite.getBuffer())
   {
     isNextPageReady = false;
@@ -493,13 +587,110 @@ void preloadPage(int page)
   {
     pageFile.read(jpgBuffer, fileSize);
     pageFile.close();
-    success =
-        nextPageSprite.drawJpg(jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H,
-                               0, 0, 0.0f, 0.0f, datum_t::top_left);
+    if (jpeg.openRAM(jpgBuffer, fileSize, drawMCU))
+    {
+      int imgW = jpeg.getWidth();
+      int imgH = jpeg.getHeight();
+      
+      static LGFX_Sprite fullPageSprite(&M5.Display);
+      prepareSprite(fullPageSprite, imgW, imgH, 16, true);
+      
+      JpegDrawContext ctx = {&fullPageSprite, 0, 0, imgW, imgH};
+      jpeg.setPixelType(RGB565_BIG_ENDIAN);
+      jpeg.setUserPointer(&ctx);
+      success = jpeg.decode(0, 0, 0);
+      jpeg.close();
+
+      if (success)
+      {
+        nextPageSprite.fillScreen(TFT_WHITE);
+
+        float scale = 1.0f;
+        FitMode effectiveFitMode = fitMode;
+
+        if (effectiveFitMode == FIT_SMART)
+        {
+          float imgAspect = (float)imgW / (float)imgH;
+          float screenAspect = (float)screenW / (float)screenH;
+          if (imgAspect > screenAspect * 1.1f || imgH > imgW * 1.5f)
+            effectiveFitMode = FIT_WIDTH;
+          else
+            effectiveFitMode = FIT_SCREEN;
+        }
+
+        if (effectiveFitMode == FIT_SCREEN)
+        {
+          scale = std::min((float)screenW / imgW, (float)screenH / imgH);
+          int outW = (int)(imgW * scale);
+          int outH = (int)(imgH * scale);
+          int offsetX = (screenW - outW) / 2;
+          int offsetY = (screenH - outH) / 2;
+          fullPageSprite.setPivot(imgW / 2, imgH / 2);
+          fullPageSprite.pushRotateZoom(&nextPageSprite, offsetX + outW / 2, offsetY + outH / 2, 0, scale, scale);
+        }
+        else if (effectiveFitMode == FIT_WIDTH)
+        {
+          scale = (float)screenW / imgW;
+          int visibleImgH = (int)(screenH / scale);
+          int overlapImg = (int)(stripOverlapPx / scale);
+          if (overlapImg >= visibleImgH)
+            overlapImg = visibleImgH / 2;
+
+          int stepImg = visibleImgH - overlapImg;
+          int localStripsPerPage = (imgH - overlapImg + stepImg - 1) / stepImg;
+          if (localStripsPerPage < 1)
+            localStripsPerPage = 1;
+
+          int localStrip = strip;
+          if (localStrip == -1)
+            localStrip = localStripsPerPage - 1;
+          if (localStrip >= localStripsPerPage)
+            localStrip = localStripsPerPage - 1;
+
+          int yStart = localStrip * stepImg;
+          if (yStart + visibleImgH > imgH)
+            yStart = imgH - visibleImgH;
+          if (yStart < 0)
+            yStart = 0;
+
+          fullPageSprite.setPivot(0, yStart);
+          fullPageSprite.pushRotateZoom(&nextPageSprite, 0, 0, 0, scale, scale);
+        }
+        else if (effectiveFitMode == FIT_HEIGHT)
+        {
+          scale = (float)screenH / imgH;
+          int visibleImgW = (int)(screenW / scale);
+          int overlapImg = (int)(stripOverlapPx / scale);
+          if (overlapImg >= visibleImgW)
+            overlapImg = visibleImgW / 2;
+
+          int stepImg = visibleImgW - overlapImg;
+          int localStripsPerPage = (imgW - overlapImg + stepImg - 1) / stepImg;
+          if (localStripsPerPage < 1)
+            localStripsPerPage = 1;
+
+          int localStrip = strip;
+          if (localStrip == -1)
+            localStrip = localStripsPerPage - 1;
+          if (localStrip >= localStripsPerPage)
+            localStrip = localStripsPerPage - 1;
+
+          int xStart = localStrip * stepImg;
+          if (xStart + visibleImgW > imgW)
+            xStart = imgW - visibleImgW;
+          if (xStart < 0)
+            xStart = 0;
+
+          fullPageSprite.setPivot(xStart, 0);
+          fullPageSprite.pushRotateZoom(&nextPageSprite, 0, 0, 0, scale, scale);
+        }
+      }
+      fullPageSprite.deleteSprite();
+    }
   }
   else
   {
-    success = nextPageSprite.drawJpg(&pageFile, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+    success = drawJpgWithJpegDecFile(nextPageSprite, pageFile, 0, 0, screenW, screenH);
     pageFile.close();
   }
 
@@ -511,6 +702,7 @@ void preloadPage(int page)
       applyDithering(nextPageSprite);
     }
     preloadedPage = page;
+    preloadedStrip = strip;
     preloadedMangaPath = currentMangaPath;
     isNextPageReady = true;
   }
@@ -521,13 +713,89 @@ void preloadPage(int page)
   setCpuFrequencyMhz(80);
 }
 
+static bool drawThumbnail(LGFX_Sprite &spr, File &f, int x, int y, int w, int h)
+{
+  if (jpeg.open(f, drawMCU))
+  {
+    int imgW = jpeg.getWidth();
+    int imgH = jpeg.getHeight();
+
+    int scaleMode = 0; // iOptions: 0=1:1, 1=1:2, 2=1:4, 3=1:8
+    int div = 1;
+
+    if (imgW >= w * 8 && imgH >= h * 8)
+    {
+      scaleMode = JPEG_SCALE_EIGHTH;
+      div = 8;
+    }
+    else if (imgW >= w * 4 && imgH >= h * 4)
+    {
+      scaleMode = JPEG_SCALE_QUARTER;
+      div = 4;
+    }
+    else if (imgW >= w * 2 && imgH >= h * 2)
+    {
+      scaleMode = JPEG_SCALE_HALF;
+      div = 2;
+    }
+
+    int decW = imgW / div;
+    int decH = imgH / div;
+
+    static LGFX_Sprite tempSpr(&M5.Display);
+    prepareSprite(tempSpr, decW, decH, 16, true);
+    if (!tempSpr.getBuffer())
+    {
+      jpeg.close();
+      return false;
+    }
+
+    JpegDrawContext ctx = {&tempSpr, 0, 0, decW, decH};
+    jpeg.setPixelType(RGB565_BIG_ENDIAN);
+    jpeg.setUserPointer(&ctx);
+    bool res = jpeg.decode(0, 0, scaleMode);
+    jpeg.close();
+
+    if (res)
+    {
+      float imgAspect = (float)imgW / (float)imgH;
+      float targetAspect = (float)w / (float)h;
+
+      float finalScale;
+      if (imgAspect > targetAspect)
+      {
+        finalScale = (float)w / decW;
+      }
+      else
+      {
+        finalScale = (float)h / decH;
+      }
+
+      tempSpr.setPivot(decW / 2, decH / 2);
+      tempSpr.pushRotateZoom(&spr, x + w / 2, y + h / 2, 0, finalScale,
+                             finalScale);
+    }
+    return res;
+  }
+  return false;
+}
+
 void drawMenu()
 {
   static String drawnLastMangaName = "";
   static int drawnLastPage = -1;
   static int drawnLastMenuScroll = -1;
 
-  int totalItems = (int)mangaFolders.size() + 2;
+  M5.Display.setRotation(0);
+  
+  // Total items calculation depends on the active tab
+  // Index 0: BOOKMARKS, Index 1+: Content
+  int totalItems;
+  if (currentMenuTab == TAB_COMIC)
+    totalItems = (int)mangaFolders.size() + 1;
+  else
+    totalItems = (int)bookFiles.size() + 1;
+
   int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
   if (!menuCacheValid || lastDrawnMenuScroll != menuScroll)
@@ -536,32 +804,42 @@ void drawMenu()
     if (menuCacheSprite.getBuffer())
     {
       menuCacheSprite.fillScreen(UI_BG);
-      menuCacheSprite.drawLine(0, 80, DISPLAY_W, 80, UI_BORDER);
-      menuCacheSprite.setFont(&fonts::DejaVu24);
-      menuCacheSprite.setTextColor(UI_FG, UI_BG);
-      menuCacheSprite.setCursor(GRID_GUTTER, 30);
-      menuCacheSprite.print("Library");
-
-      menuCacheSprite.setFont(&fonts::DejaVu12);
-      menuCacheSprite.setTextColor(UI_FG, UI_BG);
-      menuCacheSprite.setCursor(GRID_GUTTER, 60);
-      menuCacheSprite.printf("%d titles available", (int)mangaFolders.size());
-
-      if (totalItems > 0)
-      {
-        int curPg = (menuScroll / MENU_VISIBLE) + 1;
-        int maxPg = (totalItems + MENU_VISIBLE - 1) / MENU_VISIBLE;
+      
+      // Draw Tabs
+      int tabW = DISPLAY_W / 2;
+      int tabH = 80;
+      
+      // Comic Tab
+      if (currentMenuTab == TAB_COMIC) {
+        menuCacheSprite.fillRect(0, 0, tabW, tabH, UI_FG);
+        menuCacheSprite.setTextColor(UI_BG, UI_FG);
+      } else {
+        menuCacheSprite.drawRect(0, 0, tabW, tabH, UI_BORDER);
         menuCacheSprite.setTextColor(UI_FG, UI_BG);
-        menuCacheSprite.setCursor(DISPLAY_W - 100, 30);
-        menuCacheSprite.printf("Pg %d/%d", curPg, maxPg);
       }
+      menuCacheSprite.setFont(&fonts::DejaVu24);
+      menuCacheSprite.setTextDatum(middle_center);
+      menuCacheSprite.drawString("Comic", tabW / 2, tabH / 2);
 
-      if (mangaFolders.empty())
+      // Document Tab
+      if (currentMenuTab == TAB_DOCUMENT) {
+        menuCacheSprite.fillRect(tabW, 0, tabW, tabH, UI_FG);
+        menuCacheSprite.setTextColor(UI_BG, UI_FG);
+      } else {
+        menuCacheSprite.drawRect(tabW, 0, tabW, tabH, UI_BORDER);
+        menuCacheSprite.setTextColor(UI_FG, UI_BG);
+      }
+      menuCacheSprite.drawString("Document", tabW + tabW / 2, tabH / 2);
+      
+      menuCacheSprite.setTextDatum(top_left);
+      menuCacheSprite.drawLine(0, tabH, DISPLAY_W, tabH, UI_BORDER);
+
+      if (totalItems == 0 || (currentMenuTab == TAB_COMIC && mangaFolders.empty()) || (currentMenuTab == TAB_DOCUMENT && bookFiles.empty()))
       {
         menuCacheSprite.setFont(&fonts::DejaVu18);
-        menuCacheSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+        menuCacheSprite.setTextColor(UI_FG, UI_BG);
         menuCacheSprite.setCursor(GRID_GUTTER, 120);
-        menuCacheSprite.println("No manga found in /manga/");
+        menuCacheSprite.println(currentMenuTab == TAB_COMIC ? "No manga found in /manga/" : "No books found in /book/");
       }
       else
       {
@@ -573,75 +851,65 @@ void drawMenu()
           int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
           int y = GRID_Y_TOP + row * GRID_ROW_H;
 
-          menuCacheSprite.fillRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS,
-                                        UI_BG);
-          menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS,
-                                        UI_BORDER);
+          menuCacheSprite.fillRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BG);
+          menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BORDER);
 
-          if (i == 0)
+          if (i == 0) // BOOKMARKS
           {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20,
-                                          THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
             int iconX = x + (THUMB_W - 96) / 2;
             int iconY = y + (THUMB_H - 96) / 2;
-            menuCacheSprite.drawBitmap(
-                iconX, iconY, image_book_70dp_1F1F1F_bits, 96, 96, UI_FG);
+            menuCacheSprite.drawBitmap(iconX, iconY, bookmarks_material_icon, 96, 96, UI_FG);
             menuCacheSprite.setFont(&fonts::DejaVu12);
             menuCacheSprite.setTextColor(UI_FG, UI_BG);
             menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
+            menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2, y + THUMB_H + 10);
             menuCacheSprite.setTextDatum(top_left);
           }
-          else if (i == 1)
+          else // Content
           {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20,
-                                          THUMB_H - 20, UI_RADIUS, UI_ACCENT);
-            int iconX = x + (THUMB_W - 96) / 2;
-            int iconY = y + (THUMB_H - 96) / 2;
-            menuCacheSprite.drawBitmap(
-                iconX, iconY, image_drive_folder_upload_70dp_1F1F1F_bits, 96,
-                96, UI_FG);
-            menuCacheSprite.setFont(&fonts::DejaVu12);
-            menuCacheSprite.setTextColor(UI_FG, UI_BG);
-            menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("FILES", x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
-            menuCacheSprite.setTextDatum(top_left);
-          }
-          else
-          {
-            int fIdx = i - 2;
-            String coverPath =
-                makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[fIdx], 0);
-            File coverFile = SD.open(coverPath.c_str());
-            if (coverFile)
+            int cIdx = i - 1;
+            if (currentMenuTab == TAB_COMIC)
             {
-              float imgAspect = 540.0f / 960.0f;
-              int scaledW = (int)((THUMB_H - 4) * imgAspect);
-              int xOffset = (THUMB_W - 4 - scaledW) / 2;
-              if (xOffset < 0)
-                xOffset = 0;
-              menuCacheSprite.drawJpg(&coverFile, x + 2 + xOffset, y + 2, THUMB_W - 4, THUMB_H - 4, 0, 0, 0.0f, 0.0f);
-              coverFile.close();
-            }
-            else
-            {
-              menuCacheSprite.setTextColor(UI_FG, UI_BG);
+              String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[cIdx], 0);
+              File coverFile = SD.open(coverPath.c_str());
+              if (coverFile)
+              {
+                drawThumbnail(menuCacheSprite, coverFile, x + 2, y + 2, THUMB_W - 4, THUMB_H - 4);
+                coverFile.close();
+              }
+              else
+              {
+                menuCacheSprite.setTextColor(UI_FG, UI_BG);
+                menuCacheSprite.setFont(&fonts::DejaVu12);
+                menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
+                menuCacheSprite.print("NO COVER");
+              }
+              String title = mangaFolders[cIdx];
+              if (title.length() > 22) title = title.substring(0, 20) + "...";
+              
               menuCacheSprite.setFont(&fonts::DejaVu12);
-              menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
-              menuCacheSprite.print("NO COVER");
+              menuCacheSprite.setTextColor(UI_FG, UI_BG);
+              menuCacheSprite.setTextDatum(top_center);
+              menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+              menuCacheSprite.setTextDatum(top_left);
             }
-            menuCacheSprite.setFont(&fonts::DejaVu12);
-            menuCacheSprite.setTextColor(UI_FG, UI_BG);
-            String title = mangaFolders[fIdx];
-            if (title.length() > 22)
-              title = title.substring(0, 20) + "...";
+            else // TAB_DOCUMENT
+            {
+              menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+              int iconX = x + (THUMB_W - 96) / 2;
+              int iconY = y + (THUMB_H - 96) / 2;
+              menuCacheSprite.drawBitmap(iconX, iconY, book_material_icon, 96, 96, UI_FG);
+              
+              String title = bookFiles[cIdx];
+              if (title.length() > 22) title = title.substring(0, 20) + "...";
 
-            menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString(title, x + THUMB_W / 2,
-                                       y + THUMB_H + 10);
-            menuCacheSprite.setTextDatum(top_left);
+              menuCacheSprite.setFont(&fonts::DejaVu12);
+              menuCacheSprite.setTextColor(UI_FG, UI_BG);
+              menuCacheSprite.setTextDatum(top_center);
+              menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+              menuCacheSprite.setTextDatum(top_left);
+            }
           }
         }
       }
@@ -652,16 +920,28 @@ void drawMenu()
     }
   }
 
+  bool isDocTab = (currentMenuTab == TAB_DOCUMENT);
+  String currentResumeName = isDocTab ? currentBookPath : lastMangaName;
+  int currentResumePage = isDocTab ? currentTextPage : lastPage;
+
   if (menuCacheValid &&
-      (drawnLastMangaName != lastMangaName || drawnLastPage != lastPage ||
+      (drawnLastMangaName != currentResumeName || 
+       drawnLastPage != currentResumePage ||
        drawnLastMenuScroll != menuScroll))
   {
+    String resumeName = currentResumeName;
+    int resumePage = currentResumePage;
+
+    if (isDocTab && resumeName.length() > 0) {
+        int lastSlash = resumeName.lastIndexOf('/');
+        if (lastSlash >= 0) resumeName = resumeName.substring(lastSlash + 1);
+    }
     int barW = DISPLAY_W - 40;
     int barH = 60;
     int barX = 20;
     int barY = DISPLAY_H - 85;
 
-    if (lastMangaName.length() == 0)
+    if (resumeName.length() == 0)
     {
       menuCacheSprite.fillRect(barX, barY - 2, barW + 4, barH + 4,
                                UI_BG); // Erase shadow + bar
@@ -682,14 +962,14 @@ void drawMenu()
       menuCacheSprite.print("CONTINUE: ");
 
       menuCacheSprite.setFont(&fonts::DejaVu18);
-      String shortName = lastMangaName;
+      String shortName = resumeName;
       if (shortName.length() > 19)
         shortName = shortName.substring(0, 17) + "...";
       menuCacheSprite.print(shortName);
 
       menuCacheSprite.setFont(&fonts::DejaVu12);
       menuCacheSprite.setCursor(barX + 15, barY + 36);
-      menuCacheSprite.printf("Page %d", lastPage + 1);
+      menuCacheSprite.printf("Page %d", resumePage + 1);
 
       // "RESUME" Button
       int btnW = 90;
@@ -698,8 +978,8 @@ void drawMenu()
       int btnY = barY + 10;
       drawModernButton(menuCacheSprite, btnX, btnY, btnW, btnH, "RESUME", true);
     }
-    drawnLastMangaName = lastMangaName;
-    drawnLastPage = lastPage;
+    drawnLastMangaName = currentResumeName;
+    drawnLastPage = currentResumePage;
     drawnLastMenuScroll = menuScroll;
     forceFullMenuRedraw = true;
   }
@@ -776,14 +1056,17 @@ void drawMenu()
 void drawControlCenter()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
   if (!gSprite.getBuffer())
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
-  int modW = 500;
-  int modH = 300;
-  int modX = (DISPLAY_W - modW) / 2;
-  int modY = (DISPLAY_H - modH) / 2;
+  
+  // Phone-like fast access menu at the top
+  int modW = DISPLAY_W - 40;
+  int modH = 220;
+  int modX = 20;
+  int modY = 40;
 
   // Drop shadow
   gSprite.fillRoundRect(modX + 6, modY + 6, modW, modH, UI_RADIUS, UI_SHADOW);
@@ -796,31 +1079,65 @@ void drawControlCenter()
   gSprite.drawRoundRect(modX + 2, modY + 2, modW - 4, modH - 4, UI_RADIUS - 2,
                         UI_BORDER);
 
-  // Header
+  // Status Bar Line: Time & Date (Left), Battery (Right)
+  auto dt = M5.Rtc.getDateTime();
+  char timeStr[10];
+  char dateStr[15];
+  sprintf(timeStr, "%02d:%02d", dt.time.hours, dt.time.minutes);
+  sprintf(dateStr, "%02d-%02d-%04d", dt.date.date, dt.date.month, dt.date.year);
+
+  int topPad = modY + 25;
+  
   gSprite.setTextColor(UI_FG, UI_BG);
-  gSprite.setFont(&fonts::DejaVu24);
-  gSprite.setTextDatum(top_center);
-  gSprite.drawString("System Menu", modX + modW / 2, modY + 25);
   gSprite.setTextDatum(top_left);
-  gSprite.drawLine(modX, modY + 70, modX + modW, modY + 70, UI_BORDER);
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.drawString(timeStr, modX + 30, topPad);
+  
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.drawString(dateStr, modX + 30, topPad + 30);
 
   int bat = M5.Power.getBatteryLevel();
-  gSprite.setFont(&fonts::DejaVu18);
-  gSprite.setCursor(modX + 30, modY + 100);
-  gSprite.printf("Battery Level: %d%%", bat);
+  char batStr[10];
+  sprintf(batStr, "%d%%", bat);
+  
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.setTextDatum(top_right);
+  gSprite.drawString(batStr, modX + modW - 65, topPad);
+  
+  // Draw simple battery icon next to text
+  int batX = modX + modW - 63;
+  int batY = topPad + 4;
+  gSprite.drawRect(batX, batY, 30, 16, UI_FG);
+  gSprite.fillRect(batX + 30, batY + 4, 3, 8, UI_FG);
+  gSprite.fillRect(batX + 2, batY + 2, 26 * bat / 100, 12, UI_FG);
+  gSprite.setTextDatum(top_left);
 
-  int pW = modW - 60;
-  int pX = modX + 30;
-  int pY = modY + 130;
-  gSprite.drawRoundRect(pX, pY, pW, 40, UI_RADIUS, UI_BORDER);
-  gSprite.fillRoundRect(pX + 4, pY + 4, (pW - 8) * bat / 100, 32, UI_RADIUS - 2,
-                        UI_FG);
+  // Divider
+  gSprite.drawLine(modX, modY + 80, modX + modW, modY + 80, UI_BORDER);
 
-  int btnW = modW - 60;
-  int btnH = 60;
-  int btnX = modX + 30;
-  int btnY = modY + 210;
-  drawModernButton(gSprite, btnX, btnY, btnW, btnH, "SHUTDOWN", true);
+  // Quick Action 1: Shutdown (Circle button)
+  int btnR = 40;
+  int btnX1 = modX + 160;
+  int btnY = modY + 140;
+  
+  gSprite.fillCircle(btnX1, btnY, btnR, UI_ACCENT);
+  gSprite.drawCircle(btnX1, btnY, btnR, UI_BORDER);
+  gSprite.drawBitmap(btnX1 - 28, btnY - 28, power_material_icon, 56, 56, UI_FG);
+  
+  gSprite.setTextColor(UI_FG, UI_BG);
+  gSprite.setFont(&fonts::DejaVu12);
+  gSprite.setTextDatum(top_center);
+  gSprite.drawString("Shutdown", btnX1, btnY + btnR + 15);
+
+  // Quick Action 2: Settings / Files (Circle button)
+  int btnX2 = modX + 340;
+  
+  gSprite.fillCircle(btnX2, btnY, btnR, UI_ACCENT);
+  gSprite.drawCircle(btnX2, btnY, btnR, UI_BORDER);
+  gSprite.drawBitmap(btnX2 - 28, btnY - 28, settings_material_icon, 56, 56, UI_FG);
+  
+  gSprite.drawString("Setting", btnX2, btnY + btnR + 15);
+  gSprite.setTextDatum(top_left);
 
   M5.Display.startWrite();
   gSprite.pushSprite(0, 0, TFT_MAGENTA);
@@ -859,13 +1176,14 @@ void systemShutdown()
     String path = pics[r];
     if (!path.startsWith("/"))
       path = String(PIC_ROOT) + "/" + path;
+    M5.Display.setRotation(0);
     prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
     if (gSprite.getBuffer())
     {
       File f = SD.open(path.c_str());
       if (f)
       {
-        if (gSprite.drawJpg(&f, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left))
+        if (drawJpgWithJpegDecFile(gSprite, f, 0, 0, DISPLAY_W, DISPLAY_H))
         {
           M5.Display.startWrite();
           gSprite.pushSprite(0, 0);
@@ -889,12 +1207,13 @@ void systemShutdown()
 void drawBookConfig()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
   if (!gSprite.getBuffer())
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
   int modW = 460;
-  int modH = 490;
+  int modH = (appState == STATE_TEXT_READER) ? 420 : 710;
   int modX = (DISPLAY_W - modW) / 2;
   int modY = (DISPLAY_H - modH) / 2;
 
@@ -918,41 +1237,79 @@ void drawBookConfig()
   gSprite.drawLine(modX, modY + 70, modX + modW, modY + 70, UI_BORDER);
 
   int barY = modY + 85;
-  gSprite.drawRoundRect(modX + 20, barY, modW - 40, 80, UI_RADIUS, UI_BORDER);
+  gSprite.drawRoundRect(modX + 20, barY, modW - 40, 150, UI_RADIUS, UI_BORDER);
   gSprite.setFont(&fonts::DejaVu24);
-  gSprite.setCursor(modX + 45, barY + 25);
+  gSprite.setCursor(modX + 50, barY + 25);
   gSprite.print("<<");
-  gSprite.setCursor(modX + 115, barY + 25);
+  gSprite.setCursor(modX + 120, barY + 25);
   gSprite.print("<");
-  String pg = String(bookConfigPendingPage + 1) + " / " + String(totalPages);
+  String pg;
+  int total;
+  if (appState == STATE_TEXT_READER)
+  {
+    total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
+    pg = String(bookConfigPendingPage + 1) + " / " + String(total);
+  }
+  else {
+    total = totalPages;
+    pg = String(bookConfigPendingPage + 1) + " / " + String(total);
+  }
   int pgW = pg.length() * 14;
   gSprite.setCursor(modX + (modW - pgW) / 2, barY + 25);
   gSprite.print(pg);
-  gSprite.setCursor(modX + modW - 135, barY + 25);
+  gSprite.setCursor(modX + modW - 132, barY + 25);
   gSprite.print(">");
-  gSprite.setCursor(modX + modW - 85, barY + 25);
+  gSprite.setCursor(modX + modW - 75, barY + 25);
   gSprite.print(">>");
 
-  gSprite.drawLine(modX, modY + 180, modX + modW, modY + 180, UI_BORDER);
+  // Second row: First / Last
+  gSprite.drawLine(modX + 20, barY + 75, modX + modW - 20, barY + 75, UI_BORDER);
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.setCursor(modX + 60, barY + 100);
+  gSprite.print("First page");
+  gSprite.setCursor(modX + modW - 150, barY + 100);
+  gSprite.print("Last page");
+
+  gSprite.drawLine(modX, modY + 250, modX + modW, modY + 250, UI_BORDER);
 
   int btnW = modW - 60;
   int btnX = modX + 30;
   int btnH = 60;
 
-  int btnY0 = modY + 190;
-  String ditherMsg = String("DITHER: ") + ditherModeName();
-  drawModernButton(gSprite, btnX, btnY0, btnW, btnH, ditherMsg.c_str(), false);
+  int btnYBookmark, btnYReturn;
 
-  int btnY1 = modY + 260;
-  String contrastMsg = String("CONTRAST: ") + contrastPresetName();
-  drawModernButton(gSprite, btnX, btnY1, btnW, btnH, contrastMsg.c_str(),
-                   false);
+  if (appState != STATE_TEXT_READER)
+  {
+    int btnY0 = modY + 260;
+    String ditherMsg = String("DITHER: ") + ditherModeName();
+    drawModernButton(gSprite, btnX, btnY0, btnW, btnH, ditherMsg.c_str(), false);
 
-  int btnY2 = modY + 330;
-  drawModernButton(gSprite, btnX, btnY2, btnW, btnH, "BOOKMARK PAGE", false);
+    int btnY1 = modY + 330;
+    String contrastMsg = String("CONTRAST: ") + contrastPresetName();
+    drawModernButton(gSprite, btnX, btnY1, btnW, btnH, contrastMsg.c_str(),
+                     false);
 
-  int btnY3 = modY + 400;
-  drawModernButton(gSprite, btnX, btnY3, btnW, btnH, "RETURN TO LIBRARY", true);
+    int btnYMode = modY + 400;
+    String modeMsg = "MODE: VERTICAL";
+    if (orientationMode == ORIENT_LANDSCAPE) modeMsg = "MODE: HORIZONTAL";
+    else if (orientationMode == ORIENT_AUTO) modeMsg = "MODE: AUTO";
+    drawModernButton(gSprite, btnX, btnYMode, btnW, btnH, modeMsg.c_str(), false);
+
+    int btnYFit = modY + 470;
+    String fitMsg = String("FIT: ") + fitModeName();
+    drawModernButton(gSprite, btnX, btnYFit, btnW, btnH, fitMsg.c_str(), false);
+
+    btnYBookmark = modY + 540;
+    btnYReturn = modY + 610;
+  }
+  else
+  {
+    btnYBookmark = modY + 260;
+    btnYReturn = modY + 330;
+  }
+
+  drawModernButton(gSprite, btnX, btnYBookmark, btnW, btnH, "BOOKMARK PAGE", false);
+  drawModernButton(gSprite, btnX, btnYReturn, btnW, btnH, "RETURN TO LIBRARY", true);
 
   M5.Display.startWrite();
   gSprite.pushSprite(0, 0, TFT_MAGENTA);
@@ -963,6 +1320,7 @@ void drawBookConfig()
 void drawBookmarks()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
   if (!gSprite.getBuffer())
     return;
@@ -981,8 +1339,21 @@ void drawBookmarks()
     gSprite.printf("< %s", t.c_str());
   }
   int itemsPerPage = (DISPLAY_H - 200) / 90;
+  
+  bool isDocument = (currentMenuTab == TAB_DOCUMENT);
+  auto uniqueFolders = getUniqueBookmarkFolders(isDocument);
+  
   int totalItems = 0;
-  if (bookmarks.empty())
+  if (selectedBookmarkFolder == "") {
+    totalItems = uniqueFolders.size();
+  } else {
+    for (const auto &b : bookmarks) {
+      if (b.folder == selectedBookmarkFolder)
+        totalItems++;
+    }
+  }
+
+  if (totalItems == 0)
   {
     gSprite.setTextColor(UI_FG, UI_BG);
     gSprite.setFont(&fonts::DejaVu18);
@@ -995,8 +1366,6 @@ void drawBookmarks()
     int itemH = 80;
     if (selectedBookmarkFolder == "")
     {
-      auto uniqueFolders = getUniqueBookmarkFolders();
-      totalItems = uniqueFolders.size();
       int count = 0;
       for (int i = 0; i < (int)uniqueFolders.size(); i++)
       {
@@ -1033,7 +1402,6 @@ void drawBookmarks()
       {
         if (bookmarks[i].folder != selectedBookmarkFolder)
           continue;
-        totalItems++;
         if (folderItemIdx < bookmarkScroll)
         {
           folderItemIdx++;
@@ -1082,6 +1450,7 @@ void drawBookmarks()
 void drawWifiServer()
 {
   forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
   if (!isWifiServerRunning())
     startWifiServer();
   prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, true);
@@ -1133,15 +1502,19 @@ void drawPage()
 
   setCpuFrequencyMhz(240);
 
-  // 1. Instant turn logic: Check if requested page is preloaded
+  // Set rotation based on mode
+  M5.Display.setRotation(getActiveRotation());
+  int screenW = M5.Display.width();
+  int screenH = M5.Display.height();
+
+  // 1. Instant turn logic: Check if requested page/strip is preloaded
   if (isNextPageReady && preloadedPage == currentPage &&
+      preloadedStrip == currentStrip &&
       preloadedMangaPath == currentMangaPath)
   {
-    Serial.printf("Instant turn for page %d\n", currentPage + 1);
+    Serial.printf("Instant turn for page %d strip %d\n", currentPage + 1, currentStrip);
 
-    // Swap buffers/sprites or just draw nextPageSprite to gSprite
-    // The most robust way in LGFX without direct pointer hacking is pushSprite
-    prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
+    prepareSprite(gSprite, screenW, screenH, 16, true);
     nextPageSprite.pushSprite(&gSprite, 0, 0);
 
     isNextPageReady = false; // Used it up
@@ -1149,10 +1522,10 @@ void drawPage()
   else
   {
     String path = makePagePath(currentMangaPath, currentPage);
-    Serial.printf("Drawing [%d/%d]: %s\n", currentPage + 1, totalPages,
-                  path.c_str());
+    Serial.printf("Drawing [%d/%d] Strip %d: %s\n", currentPage + 1, totalPages,
+                  currentStrip, path.c_str());
 
-    prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
+    prepareSprite(gSprite, screenW, screenH, 16, true);
     if (!gSprite.getBuffer())
     {
       setCpuFrequencyMhz(80);
@@ -1176,11 +1549,113 @@ void drawPage()
     {
       pageFile.read(jpgBuffer, fileSize);
       pageFile.close();
-      decodeSuccess = gSprite.drawJpg(jpgBuffer, fileSize, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+      if (jpeg.openRAM(jpgBuffer, fileSize, drawMCU))
+      {
+        int imgW = jpeg.getWidth();
+        int imgH = jpeg.getHeight();
+        
+        static LGFX_Sprite fullPageSprite(&M5.Display);
+        prepareSprite(fullPageSprite, imgW, imgH, 16, true);
+        
+        JpegDrawContext ctx = {&fullPageSprite, 0, 0, imgW, imgH};
+        jpeg.setPixelType(RGB565_BIG_ENDIAN);
+        jpeg.setUserPointer(&ctx);
+        decodeSuccess = jpeg.decode(0, 0, 0);
+        jpeg.close();
+
+        if (decodeSuccess)
+        {
+          gSprite.fillScreen(TFT_WHITE);
+
+          float scale = 1.0f;
+          FitMode effectiveFitMode = fitMode;
+
+          if (effectiveFitMode == FIT_SMART)
+          {
+            float imgAspect = (float)imgW / (float)imgH;
+            float screenAspect = (float)screenW / (float)screenH;
+            // If image is significantly wider than screen aspect, or very tall, use FIT_WIDTH
+            if (imgAspect > screenAspect * 1.1f || imgH > imgW * 1.5f)
+              effectiveFitMode = FIT_WIDTH;
+            else
+              effectiveFitMode = FIT_SCREEN;
+          }
+
+          if (effectiveFitMode == FIT_SCREEN)
+          {
+            stripsPerPage = 1;
+            currentStrip = 0;
+            scale = std::min((float)screenW / imgW, (float)screenH / imgH);
+            int outW = (int)(imgW * scale);
+            int outH = (int)(imgH * scale);
+            int offsetX = (screenW - outW) / 2;
+            int offsetY = (screenH - outH) / 2;
+            fullPageSprite.setPivot(imgW / 2, imgH / 2);
+            fullPageSprite.pushRotateZoom(&gSprite, offsetX + outW / 2, offsetY + outH / 2, 0, scale, scale);
+          }
+          else if (effectiveFitMode == FIT_WIDTH)
+          {
+            scale = (float)screenW / imgW;
+            int visibleImgH = (int)(screenH / scale);
+            int overlapImg = (int)(stripOverlapPx / scale);
+            if (overlapImg >= visibleImgH)
+              overlapImg = visibleImgH / 2;
+
+            int stepImg = visibleImgH - overlapImg;
+            stripsPerPage = (imgH - overlapImg + stepImg - 1) / stepImg;
+            if (stripsPerPage < 1)
+              stripsPerPage = 1;
+
+            if (currentStrip == -1)
+              currentStrip = stripsPerPage - 1;
+            if (currentStrip >= stripsPerPage)
+              currentStrip = stripsPerPage - 1;
+
+            int yStart = currentStrip * stepImg;
+            if (yStart + visibleImgH > imgH)
+              yStart = imgH - visibleImgH;
+            if (yStart < 0)
+              yStart = 0;
+
+            fullPageSprite.setPivot(0, yStart);
+            fullPageSprite.pushRotateZoom(&gSprite, 0, 0, 0, scale, scale);
+          }
+          else if (effectiveFitMode == FIT_HEIGHT)
+          {
+            scale = (float)screenH / imgH;
+            int visibleImgW = (int)(screenW / scale);
+            int overlapImg = (int)(stripOverlapPx / scale);
+            if (overlapImg >= visibleImgW)
+              overlapImg = visibleImgW / 2;
+
+            int stepImg = visibleImgW - overlapImg;
+            stripsPerPage = (imgW - overlapImg + stepImg - 1) / stepImg;
+            if (stripsPerPage < 1)
+              stripsPerPage = 1;
+
+            if (currentStrip == -1)
+              currentStrip = stripsPerPage - 1;
+            if (currentStrip >= stripsPerPage)
+              currentStrip = stripsPerPage - 1;
+
+            int xStart = currentStrip * stepImg;
+            if (xStart + visibleImgW > imgW)
+              xStart = imgW - visibleImgW;
+            if (xStart < 0)
+              xStart = 0;
+
+            fullPageSprite.setPivot(xStart, 0);
+            fullPageSprite.pushRotateZoom(&gSprite, 0, 0, 0, scale, scale);
+          }
+        }
+        fullPageSprite.deleteSprite();
+      }
     }
     else
     {
-      decodeSuccess = gSprite.drawJpg(&pageFile, 0, 0, DISPLAY_W, DISPLAY_H, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+      if (currentStrip == -1) currentStrip = 0; // Fallback
+      // Fallback if jpgBuffer fails (rare)
+      decodeSuccess = drawJpgWithJpegDecFile(gSprite, pageFile, 0, 0, screenW, screenH);
       pageFile.close();
     }
 
@@ -1202,10 +1677,26 @@ void drawPage()
   M5.Display.display();
   M5.Display.endWrite();
 
-  // 2. Preload NEXT page in background (after rendering current)
-  if (currentPage < totalPages - 1)
+  // 2. Preload NEXT content in background
+  int nextPg = currentPage;
+  int nextStrip = currentStrip + 1;
+  if (stripsPerPage > 1)
   {
-    preloadPage(currentPage + 1);
+    if (nextStrip >= stripsPerPage)
+    {
+      nextPg++;
+      nextStrip = 0;
+    }
+  }
+  else
+  {
+    nextPg++;
+    nextStrip = 0;
+  }
+
+  if (nextPg < totalPages)
+  {
+    preloadPage(nextPg, nextStrip);
   }
 
   setCpuFrequencyMhz(80);
@@ -1220,4 +1711,569 @@ void drawError(const char *msg)
   M5.Display.setCursor(20, 40);
   M5.Display.println(msg);
   M5.Display.display();
+}
+
+
+
+// ── Buffered Text Reader ─────────────────────────────────────────────
+// Reads from a PSRAM buffer instead of per-byte SD I/O.
+// Supports virtual "position" tracking so word-break / seek logic stays identical.
+
+#define TEXT_BUF_SIZE 16384  // 16 KB chunk
+
+struct BufferedReader {
+  File* file;
+  uint8_t* buf;
+  uint32_t bufStart;   // file offset of buf[0]
+  int bufLen;          // valid bytes in buf
+  uint32_t pos;        // current virtual file position
+  uint32_t fileSize;
+
+  BufferedReader() : file(nullptr), buf(nullptr), bufStart(0), bufLen(0), pos(0), fileSize(0) {}
+  ~BufferedReader() { end(); }
+
+  bool begin(File& f) {
+    file = &f;
+    fileSize = f.size();
+    buf = (uint8_t*)heap_caps_malloc(TEXT_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    if (!buf) return false;
+    bufStart = 0;
+    bufLen = 0;
+    pos = 0;
+    return true;
+  }
+
+  void end() {
+    if (buf) { heap_caps_free(buf); buf = nullptr; }
+  }
+
+  void fillBuffer() {
+    if (!file || !buf) return;
+    file->seek(pos);
+    bufStart = pos;
+    bufLen = file->read(buf, TEXT_BUF_SIZE);
+  }
+
+  // Ensure current pos is within the buffer
+  inline void ensureBuffered() {
+    if (pos < bufStart || pos >= bufStart + (uint32_t)bufLen) {
+      fillBuffer();
+    }
+  }
+
+  bool available() { return pos < fileSize; }
+
+  uint32_t position() { return pos; }
+
+  void seek(uint32_t p) { pos = p; }
+
+  char read() {
+    ensureBuffered();
+    if (bufLen <= 0) return 0;
+    return (char)buf[pos++ - bufStart];
+  }
+
+  char peek() {
+    ensureBuffered();
+    if (bufLen <= 0) return 0;
+    return (char)buf[pos - bufStart];
+  }
+};
+
+// ── Text Page Index Persistence ──────────────────────────────────────
+// Format: [4B magic][4B fileSize][4B count][count × 4B offsets]
+
+static const uint32_t TEXT_IDX_MAGIC = 0x54585449; // "TXTI"
+
+static String makeIdxPath(const String& bookPath) {
+  // Replace .txt/.TXT with .idx
+  String idx = bookPath;
+  int dot = idx.lastIndexOf('.');
+  if (dot >= 0) idx = idx.substring(0, dot);
+  idx += ".idx";
+  return idx;
+}
+
+static bool loadTextIndex(const String& bookPath) {
+  String idxPath = makeIdxPath(bookPath);
+  File f = SD.open(idxPath.c_str(), FILE_READ);
+  if (!f) return false;
+
+  uint32_t magic, savedSize, count;
+  if (f.read((uint8_t*)&magic, 4) != 4 || magic != TEXT_IDX_MAGIC) { f.close(); return false; }
+  if (f.read((uint8_t*)&savedSize, 4) != 4 || savedSize != textFileSize) { f.close(); return false; }
+  if (f.read((uint8_t*)&count, 4) != 4 || count == 0 || count > 100000) { f.close(); return false; }
+
+  textPageOffsets.clear();
+  textPageOffsets.resize(count);
+  size_t bytesNeeded = count * 4;
+  if (f.read((uint8_t*)textPageOffsets.data(), bytesNeeded) != bytesNeeded) {
+    textPageOffsets.clear();
+    textPageOffsets.push_back(0);
+    f.close();
+    return false;
+  }
+  f.close();
+
+  // Sanity: first offset must be 0
+  if (textPageOffsets[0] != 0) {
+    textPageOffsets.clear();
+    textPageOffsets.push_back(0);
+    return false;
+  }
+
+  Serial.printf("Loaded text index: %d pages from %s\n", (int)count, idxPath.c_str());
+  estimatedTotalPages = std::max((int)count, estimatedTotalPages);
+  return true;
+}
+
+static void saveTextIndex(const String& bookPath) {
+  String idxPath = makeIdxPath(bookPath);
+  File f = SD.open(idxPath.c_str(), FILE_WRITE);
+  if (!f) { Serial.println("Failed to save text index"); return; }
+
+  uint32_t magic = TEXT_IDX_MAGIC;
+  uint32_t count = textPageOffsets.size();
+  f.write((uint8_t*)&magic, 4);
+  f.write((uint8_t*)&textFileSize, 4);
+  f.write((uint8_t*)&count, 4);
+  f.write((uint8_t*)textPageOffsets.data(), count * 4);
+  f.close();
+  Serial.printf("Saved text index: %d pages to %s\n", (int)count, idxPath.c_str());
+}
+
+void drawTextPage()
+{
+  M5.Display.setRotation(0);
+  prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 16, true);
+  if (!gSprite.getBuffer())
+    return;
+
+  gSprite.fillScreen(TFT_WHITE);
+  gSprite.setTextColor(TFT_BLACK);
+  gSprite.setTextWrap(false);
+
+  bool customFontLoaded = false;
+  Serial.println("Applying embedded Literata font...");
+  customFontLoaded = gSprite.loadFont(literata_vlw);
+  if (customFontLoaded)
+    Serial.println("SUCCESS: Literata font applied");
+  else
+    Serial.println("ERROR: Failed to apply embedded font");
+
+  if (!customFontLoaded)
+  {
+    gSprite.setFont(&fonts::DejaVu18);
+  }
+
+  File f = SD.open(currentBookPath.c_str());
+  if (!f)
+  {
+    Serial.printf("ERROR: Failed to open book: %s\n", currentBookPath.c_str());
+    drawError("Failed to open book");
+    return;
+  }
+
+  int leftMargin = 20;
+  int rightMargin = 20;
+  int topMargin = 10;
+  int bottomMargin = 20;
+  int lineH = TEXT_LINE_HEIGHT;
+
+  uint32_t offset = 0;
+
+  // discovery loop: if we want a page we haven't mapped yet, scan forward
+  // Uses buffered reader for 10-20x faster scanning vs per-byte SD reads
+  if (currentTextPage >= (int)textPageOffsets.size())
+  {
+    setCpuFrequencyMhz(240);
+    int maxW = DISPLAY_W - leftMargin - rightMargin;
+    int safetyBuffer = 8;
+    int usableMaxW = maxW - safetyBuffer;
+
+    BufferedReader br;
+    bool buffered = br.begin(f);
+
+    while (currentTextPage >= (int)textPageOffsets.size())
+    {
+      uint32_t pageStart = textPageOffsets.back();
+      if (pageStart >= textFileSize) break;
+
+      if (buffered) {
+        br.seek(pageStart);
+      } else {
+        f.seek(pageStart);
+      }
+      int y = topMargin;
+      bool isNewPara = (pageStart == 0);
+      if (pageStart > 0)
+      {
+        if (buffered) {
+          br.seek(pageStart - 1);
+          char prev = br.read();
+          if (prev == '\n' || prev == '\r') isNewPara = true;
+          br.seek(pageStart);
+        } else {
+          f.seek(pageStart - 1);
+          char prev = f.read();
+          if (prev == '\n' || prev == '\r') isNewPara = true;
+          f.seek(pageStart);
+        }
+      }
+
+      // Macro-style lambdas for buffered/unbuffered access
+      #define BR_AVAILABLE() (buffered ? br.available() : (bool)f.available())
+      #define BR_READ()      (buffered ? br.read() : (char)f.read())
+      #define BR_PEEK()      (buffered ? br.peek() : (char)f.peek())
+      #define BR_POS()       (buffered ? br.position() : (uint32_t)f.position())
+      #define BR_SEEK(p)     do { if (buffered) br.seek(p); else f.seek(p); } while(0)
+
+      while (BR_AVAILABLE() && (y + lineH < DISPLAY_H - bottomMargin))
+      {
+        int indent = isNewPara ? 40 : 0;
+        int effectiveMaxW = usableMaxW - indent;
+        bool isParaEnd = false;
+        
+        // This must match the draw loop's word fitting logic exactly
+        String testLine = "";
+        bool hasWords = false;
+
+        while (BR_AVAILABLE())
+        {
+          uint32_t wordStartPos = BR_POS();
+          String word = "";
+          bool hitNewline = false;
+          bool hitSpace = false;
+          
+          while (BR_AVAILABLE())
+          {
+            char c = BR_READ();
+            if (c == '\r') continue;
+            if (c == '\n') { 
+              hitNewline = true; 
+              while (BR_AVAILABLE()) { 
+                char next = BR_PEEK(); 
+                if (next == '\n' || next == '\r') BR_READ(); 
+                else break; 
+              } 
+              break; 
+            }
+            if (c == ' ') { hitSpace = true; break; }
+            word += c;
+          }
+          
+          if (word.length() == 0 && !hitNewline && !hitSpace) break;
+          if (word.length() == 0 && hitSpace) continue;
+
+          if (gSprite.textWidth(testLine + word) > effectiveMaxW)
+          {
+            if (hasWords) {
+              BR_SEEK(wordStartPos);
+              break;
+            } else {
+              // Word break logic for single long word
+              BR_SEEK(wordStartPos);
+              word = "";
+              while (BR_AVAILABLE()) {
+                uint32_t charStart = BR_POS();
+                unsigned char c = BR_PEEK();
+                if (c == ' ' || c == '\n' || c == '\r') break;
+                
+                int charLen = 1;
+                if ((c & 0x80) != 0) {
+                  if ((c & 0xE0) == 0xC0) charLen = 2;
+                  else if ((c & 0xF0) == 0xE0) charLen = 3;
+                  else if ((c & 0xF0) == 0xF0) charLen = 4;
+                }
+                
+                String nextChar = "";
+                for (int j = 0; j < charLen && BR_AVAILABLE(); j++) nextChar += (char)BR_READ();
+                
+                if (gSprite.textWidth(word + nextChar) > effectiveMaxW) {
+                  if (word.length() == 0) {
+                    word = nextChar; // Take at least one char to avoid infinite loop
+                  } else {
+                    BR_SEEK(charStart);
+                  }
+                  break;
+                }
+                word += nextChar;
+              }
+              testLine += word + " ";
+              hasWords = true;
+              isParaEnd = false;
+              break;
+            }
+          }
+          
+          testLine += word + " ";
+          hasWords = true;
+          
+          if (hitNewline) { isParaEnd = true; break; }
+        }
+        y += lineH;
+        isNewPara = isParaEnd;
+      }
+      
+      uint32_t nextPgStart = BR_POS();
+      if (nextPgStart < textFileSize) {
+        textPageOffsets.push_back(nextPgStart);
+      } else {
+        break; // Reached end of file
+      }
+      
+      // Smart Math: Refine total page estimate
+      if (textPageOffsets.size() >= 2) {
+          float bytesConsumed = (float)nextPgStart;
+          int pagesScanned = (int)textPageOffsets.size() - 1;
+          if (pagesScanned > 0) {
+              float avg = bytesConsumed / pagesScanned;
+              estimatedTotalPages = (int)(textFileSize / avg);
+          }
+      }
+
+      #undef BR_AVAILABLE
+      #undef BR_READ
+      #undef BR_PEEK
+      #undef BR_POS
+      #undef BR_SEEK
+    }
+
+    br.end();
+
+    if (currentTextPage >= (int)textPageOffsets.size())
+      currentTextPage = textPageOffsets.size() - 1;
+
+    // Persist the discovered offsets for next time
+    saveTextIndex(currentBookPath);
+    setCpuFrequencyMhz(80);
+  }
+
+  if (currentTextPage < (int)textPageOffsets.size())
+  {
+    offset = textPageOffsets[currentTextPage];
+  }
+  f.seek(offset);
+
+  int y = topMargin;
+  int x = leftMargin;
+  int maxW = DISPLAY_W - leftMargin - rightMargin;
+  
+  gSprite.setCursor(x, y);
+  gSprite.setTextDatum(top_left);
+
+  bool isNewParagraph = (offset == 0);
+  if (offset > 0)
+  {
+    // Check if the previous character was a newline to determine if this is a new paragraph
+    f.seek(offset - 1);
+    char prev = f.read();
+    if (prev == '\n' || prev == '\r')
+      isNewParagraph = true;
+    f.seek(offset); // Seek back to the page start
+  }
+
+  // Leave a small safety buffer for font rendering variations
+  int safetyBuffer = 8;
+  int usableMaxW = maxW - safetyBuffer;
+
+  while (f.available() && (y + lineH < DISPLAY_H - bottomMargin))
+  {
+    std::vector<String> words;
+    bool isParagraphEnd = false;
+
+    int indent = isNewParagraph ? 40 : 0;
+    int effectiveMaxW = usableMaxW - indent;
+
+    while (f.available())
+    {
+      uint32_t wordStartPos = f.position();
+      String word = "";
+      bool hitNewline = false;
+      bool hitSpace = false;
+
+      while (f.available())
+      {
+        char c = f.read();
+        if (c == '\r') continue;
+        if (c == '\n') 
+        { 
+          hitNewline = true; 
+          while (f.available()) {
+            char next = f.peek();
+            if (next == '\n' || next == '\r') f.read();
+            else break;
+          }
+          break; 
+        }
+        if (c == ' ') {
+          hitSpace = true;
+          break;
+        }
+        word += c;
+      }
+
+      if (word.length() == 0 && !hitNewline && !hitSpace) break; 
+      
+      if (word.length() == 0 && hitSpace) continue; // Skip empty words from multiple spaces
+
+      // Check if this word fits
+      String testLine = "";
+      for (const auto& w : words) testLine += w + " ";
+      
+      if (gSprite.textWidth(testLine + word) > effectiveMaxW)
+      {
+        if (words.empty()) {
+          // Single word too long. Need to break it.
+          f.seek(wordStartPos);
+          word = "";
+          while (f.available()) {
+            uint32_t charStartPos = f.position();
+            unsigned char c = f.peek();
+            
+            // Check if it's a breakable character
+            if (c == ' ' || c == '\n' || c == '\r') break;
+            
+            int charLen = 1;
+            if ((c & 0x80) != 0) {
+              if ((c & 0xE0) == 0xC0) charLen = 2;
+              else if ((c & 0xF0) == 0xE0) charLen = 3;
+              else if ((c & 0xF0) == 0xF0) charLen = 4;
+            }
+            
+            String nextChar = "";
+            for (int j = 0; j < charLen && f.available(); j++) {
+              nextChar += (char)f.read();
+            }
+            
+            if (gSprite.textWidth(word + nextChar) > effectiveMaxW) {
+              if (word.length() == 0) {
+                word = nextChar; // Take at least one char to avoid infinite loop
+              } else {
+                f.seek(charStartPos);
+              }
+              break;
+            }
+            word += nextChar;
+          }
+          words.push_back(word);
+          isParagraphEnd = false; // We broke a word, definitely not end of paragraph
+        } else {
+          // Word doesn't fit, back up to before this word
+          f.seek(wordStartPos);
+        }
+        break; 
+      }
+
+      words.push_back(word);
+      if (hitNewline) {
+        isParagraphEnd = true;
+        break;
+      }
+    }
+
+    if (words.empty()) {
+      if (isParagraphEnd) isNewParagraph = true;
+      y += lineH;
+      continue;
+    }
+
+    // Draw the line
+    int startX = x + indent;
+    if (isParagraphEnd || words.size() == 1)
+    {
+      String line = "";
+      for (size_t i = 0; i < words.size(); ++i) {
+        line += words[i] + (i == words.size() - 1 ? "" : " ");
+      }
+      gSprite.drawString(line, startX, y);
+    }
+    else
+    {
+      int totalWordsWidth = 0;
+      for (const auto& w : words) totalWordsWidth += gSprite.textWidth(w);
+      
+      float gapWidth = (float)(effectiveMaxW - totalWordsWidth) / (words.size() - 1);
+      float currentXPos = startX;
+      for (size_t i = 0; i < words.size(); ++i)
+      {
+        gSprite.drawString(words[i], (int)currentXPos, y);
+        currentXPos += gSprite.textWidth(words[i]) + gapWidth;
+      }
+    }
+    
+    y += lineH;
+    isNewParagraph = isParagraphEnd;
+  }
+
+  uint32_t nextOffset = f.position();
+  
+  // Record next page offset if not already known
+  if (currentTextPage + 1 == (int)textPageOffsets.size() && nextOffset < (uint32_t)f.size())
+  {
+    textPageOffsets.push_back(nextOffset);
+    // Persist updated index incrementally
+    saveTextIndex(currentBookPath);
+  }
+  f.close();
+
+  // Draw footer
+  gSprite.setFont(&fonts::DejaVu12);
+  gSprite.setTextDatum(top_center);
+  gSprite.drawString(String(currentTextPage + 1), DISPLAY_W / 2, DISPLAY_H - 30);
+  gSprite.setTextDatum(top_left);
+
+  M5.Display.startWrite();
+  gSprite.pushSprite(0, 0);
+  M5.Display.display();
+  M5.Display.endWrite();
+}
+
+void openBook(int idx)
+{
+  if (idx < 0 || idx >= (int)bookFiles.size())
+    return;
+  String path = String(BOOK_ROOT) + "/" + bookFiles[idx];
+  // Load per-book saved progress
+  int savedPage = loadBookProgress(path);
+  openBookPath(path, savedPage);
+}
+
+void openBookPath(const String &path, int page)
+{
+  currentBookPath = path;
+  currentTextPage = page;
+  textPageOffsets.clear();
+  textPageOffsets.push_back(0);
+
+  File f = SD.open(path.c_str());
+  if (f)
+  {
+    textFileSize = f.size();
+    // Start with a conservative estimate: ~1500 bytes per page
+    estimatedTotalPages = std::max(1, (int)(textFileSize / 1500));
+    f.close();
+  }
+
+  // Try to load cached page index for instant bookmark jumps
+  if (loadTextIndex(path)) {
+    Serial.printf("Text index loaded: %d pages cached, jumping to page %d\n",
+                  (int)textPageOffsets.size(), page);
+    if (currentTextPage >= (int)textPageOffsets.size()) 
+      currentTextPage = (int)textPageOffsets.size() - 1;
+  }
+  if (currentTextPage < 0) currentTextPage = 0;
+
+  appState = STATE_TEXT_READER;
+  currentEpdMode = epd_mode_t::epd_text;
+  needRedraw = true;
+  saveProgress();
+}
+
+void quickScreenRefresh() // Unused, leave here for future use
+{
+  M5.Display.startWrite();
+  M5.Display.clear(TFT_BLACK);
+  M5.Display.display();
+  M5.Display.endWrite();
 }

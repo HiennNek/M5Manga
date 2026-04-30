@@ -9,7 +9,10 @@ void drawBookConfig();
 void drawBookmarks();
 void drawWifiServer();
 void drawPage();
-void preloadPage(int page);
+void drawTextPage();
+void openBook(int idx);
+void openBookPath(const String &path, int page);
+void preloadPage(int page, int strip);
 void drawMagnifier(int x, int y, bool qualityMode = false);
 void resetMagnifierTracking();
 void applyFloydSteinberg(LGFX_Sprite &sprite);
@@ -23,3 +26,4 @@ void drawError(const char *msg);
 void systemShutdown();
 void drawModernButton(LGFX_Sprite &sprite, int x, int y, int w, int h,
                       const char *text, bool isPrimary = false);
+void quickScreenRefresh();

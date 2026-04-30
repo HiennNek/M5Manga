@@ -1,7 +1,9 @@
 #include "wifi_server.h"
+#include "storage.h"
 #include <SD.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <M5Unified.h>
 #include <vector>
 
 static WebServer server(80);
@@ -47,6 +49,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <button class="btn btn-blue" onclick="document.getElementById('fileInput').click()">Upload Files</button>
             <button class="btn btn-blue" onclick="document.getElementById('folderInput').click()">Upload Folder</button>
             <button class="btn btn-red" id="btnDeleteSelected" onclick="deleteSelected()" disabled>Delete Selected</button>
+            <button class="btn btn-green" onclick="syncTime()">Sync Time</button>
             <button class="btn btn-grey" onclick="goBack()">Back</button>
             <input type="file" id="fileInput" multiple onchange="uploadFiles(this.files)">
             <input type="file" id="folderInput" webkitdirectory mozdirectory msdirectory odirectory directory onchange="uploadFiles(this.files)">
@@ -221,6 +224,31 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             s.style.color = color === "red" ? "#721c24" : (color === "green" ? "#155724" : "#0c5460");
         }
 
+        async function syncTime() {
+            const now = new Date();
+            const payload = {
+                year: now.getFullYear(),
+                month: now.getMonth() + 1,
+                day: now.getDate(),
+                hours: now.getHours(),
+                minutes: now.getMinutes(),
+                seconds: now.getSeconds()
+            };
+            showStatus("Syncing time...", "blue");
+            try {
+                const response = await fetch('/sync_time', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (response.ok) {
+                    showStatus("Time synced successfully", "green");
+                } else {
+                    showStatus("Sync failed", "red");
+                }
+            } catch (e) { showStatus("Error during sync", "red"); }
+        }
+
         loadFiles();
     </script>
 </body>
@@ -299,13 +327,22 @@ static void handleDelete()
       if (f.isDirectory())
       {
         f.close();
-        // Simple recursive delete not built-in, but we can try rmdir
+        // Invalidate cache if this is a manga folder
+        if (path.startsWith(MANGA_ROOT))
+          invalidatePageCountCache(path);
         SD.rmdir(path.c_str());
       }
       else
       {
         f.close();
         SD.remove(path.c_str());
+        // Invalidate cache for the parent manga folder
+        if (path.startsWith(MANGA_ROOT))
+        {
+          int lastSlash = path.lastIndexOf('/');
+          if (lastSlash > 0)
+            invalidatePageCountCache(path.substring(0, lastSlash));
+        }
       }
     }
 
@@ -398,7 +435,55 @@ static void handleUpload()
   }
   else if (upload.status == UPLOAD_FILE_END)
   {
+    // Invalidate page count cache if file was uploaded under /manga/
+    String filename = upload.filename;
+    if (!filename.startsWith("/"))
+      filename = "/" + filename;
+    if (filename.startsWith(MANGA_ROOT))
+    {
+      int lastSlash = filename.lastIndexOf('/');
+      if (lastSlash > 0)
+        invalidatePageCountCache(filename.substring(0, lastSlash));
+    }
     server.send(200, "text/plain", "OK");
+  }
+}
+
+static void handleSyncTime()
+{
+  if (server.hasArg("plain") == false)
+  {
+    server.send(400, "text/plain", "Body not received");
+    return;
+  }
+  String body = server.arg("plain");
+  auto getVal = [&](String key) -> int {
+    int idx = body.indexOf("\"" + key + "\":");
+    if (idx == -1)
+      return -1;
+    int start = body.indexOf(":", idx) + 1;
+    int end = body.indexOf(",", start);
+    if (end == -1)
+      end = body.indexOf("}", start);
+    return (int)body.substring(start, end).toInt();
+  };
+
+  m5::rtc_datetime_t dt;
+  dt.date.year = getVal("year");
+  dt.date.month = getVal("month");
+  dt.date.date = getVal("day");
+  dt.time.hours = getVal("hours");
+  dt.time.minutes = getVal("minutes");
+  dt.time.seconds = getVal("seconds");
+
+  if (dt.date.year > 2000)
+  {
+    M5.Rtc.setDateTime(dt);
+    server.send(200, "text/plain", "OK");
+  }
+  else
+  {
+    server.send(400, "text/plain", "Invalid Date");
   }
 }
 
@@ -414,6 +499,7 @@ void startWifiServer()
   server.on("/rename", HTTP_GET, handleRename);
   server.on("/upload", HTTP_POST, []()
             { server.send(200); }, handleUpload);
+  server.on("/sync_time", HTTP_POST, handleSyncTime);
 
   server.begin();
   running = true;

@@ -12,26 +12,43 @@ struct Bookmark
   int page;
 };
 
+enum MenuTab { TAB_COMIC, TAB_DOCUMENT };
+extern MenuTab currentMenuTab;
+
 extern AppState appState;
 extern std::vector<String> mangaFolders;
 extern std::vector<int> mangaPageCounts;
+extern std::vector<String> bookFiles;
 extern int menuSelected;
 extern int menuScroll;
 extern int bookmarkScroll;
 
 extern String currentMangaPath;
+extern String currentBookPath;
 extern int totalPages;
 extern int currentPage;
+extern int currentTextPage;
+extern std::vector<uint32_t> textPageOffsets;
+extern uint32_t textFileSize;
+extern int estimatedTotalPages;
 extern bool needRedraw;
 extern bool controlMenuOpen;
 extern bool bookConfigOpen;
 extern int bookConfigPendingPage;
 extern DitherMode ditherMode;
 extern ContrastPreset contrastPreset;
+extern FitMode fitMode;
 extern bool isMagnifierActive;
 extern int magnifierX, magnifierY;
 extern String selectedBookmarkFolder;
 extern epd_mode_t currentEpdMode;
+
+extern OrientationMode orientationMode;
+extern int currentStrip;
+
+int getActiveRotation();
+extern int stripsPerPage;
+extern int stripOverlapPx;
 
 extern Preferences prefs;
 
@@ -43,9 +60,13 @@ extern bool menuCacheValid;
 extern String lastMangaPath;
 extern int lastPage;
 extern String lastMangaName;
+extern String lastBookPath;
+extern int lastTextPage;
+extern bool isLastReadManga;
 
 extern String preloadedMangaPath;
 extern int preloadedPage;
+extern int preloadedStrip;
 extern bool isNextPageReady;
 
 extern std::vector<Bookmark> bookmarks;
