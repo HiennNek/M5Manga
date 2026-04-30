@@ -5,13 +5,11 @@
 
 <table>
   <tr>
-    <td><img width="300" src="https://github.com/user-attachments/assets/e66626ce-f0b4-44ee-ba6c-09bd6ad23f59" /></td>
-    <td><img width="300" src="https://github.com/user-attachments/assets/b0349270-2c16-4a3b-965a-c684c1fa5909" /></td>
-    <td><img width="300" src="https://github.com/user-attachments/assets/f5f9a39d-05a0-475d-b03e-70a599b6549f" /></td>
+    <td><img width="300" src="https://github.com/user-attachments/assets/205b934c-0aab-40a5-975e-70320ae14652"/></td>
+    <td><img width="300" src="https://github.com/user-attachments/assets/fcafa220-9b8b-4302-a6a5-adb1d52ef048"/></td>
+    <td><img width="300" src="https://github.com/user-attachments/assets/26f804b0-466a-4fb5-beb8-b0ed420fc6c5"/></td>
   </tr>
 </table>
-
-### Perfect for reading BL btw
 
 #
 
