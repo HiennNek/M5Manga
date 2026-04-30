@@ -43,8 +43,10 @@ extern int magnifierX, magnifierY;
 extern String selectedBookmarkFolder;
 extern epd_mode_t currentEpdMode;
 
-extern bool horizontalMode;
+extern OrientationMode orientationMode;
 extern int currentStrip;
+
+int getActiveRotation();
 extern int stripsPerPage;
 extern int stripOverlapPx;
 

@@ -147,6 +147,54 @@ static bool pageExistsFast(char *buf, int prefixLen, int n)
   return SD.exists(buf);
 }
 
+static int readCachedPageCountSD(const String &folder)
+{
+  String cachePath = folder + "/.pagecount";
+  File f = SD.open(cachePath.c_str(), FILE_READ);
+  if (!f)
+    return -1;
+  String val = f.readStringUntil('\n');
+  f.close();
+  val.trim();
+  int count = val.toInt();
+  if (count <= 0 && val != "0")
+    return -1; // Invalid content
+  return count;
+}
+
+static void writeCachedPageCountSD(const String &folder, int count)
+{
+  String cachePath = folder + "/.pagecount";
+  File f = SD.open(cachePath.c_str(), FILE_WRITE);
+  if (f)
+  {
+    f.println(count);
+    f.close();
+    Serial.printf("Wrote page count cache: %s = %d\n", cachePath.c_str(), count);
+  }
+}
+
+void invalidatePageCountCache(const String &folder)
+{
+  String cachePath = folder + "/.pagecount";
+  if (SD.exists(cachePath.c_str()))
+  {
+    SD.remove(cachePath.c_str());
+    Serial.printf("Invalidated page count cache: %s\n", cachePath.c_str());
+  }
+  // Also clear the in-memory cache
+  int slash = folder.lastIndexOf('/');
+  String name = (slash >= 0) ? folder.substring(slash + 1) : folder;
+  for (size_t i = 0; i < mangaFolders.size(); ++i)
+  {
+    if (mangaFolders[i] == name)
+    {
+      mangaPageCounts[i] = -1;
+      break;
+    }
+  }
+}
+
 int findTotalPages(const String &folder)
 {
   static String cachedFolder = "";
@@ -154,6 +202,7 @@ int findTotalPages(const String &folder)
   if (folder == cachedFolder)
     return cachedCount;
 
+  // Check in-memory cache first
   int count = findCachedPageCount(folder);
   if (count >= 0)
   {
@@ -162,6 +211,18 @@ int findTotalPages(const String &folder)
     return count;
   }
 
+  // Check persistent SD cache file
+  count = readCachedPageCountSD(folder);
+  if (count >= 0)
+  {
+    Serial.printf("Cache hit from SD: %d pages\n", count);
+    cachedFolder = folder;
+    cachedCount = count;
+    storeCachedPageCount(folder, count);
+    return count;
+  }
+
+  // No cache — run binary search
   char pathBuf[256];
   strncpy(pathBuf, folder.c_str(), sizeof(pathBuf) - 64);
   pathBuf[sizeof(pathBuf) - 65] = '\0';
@@ -172,6 +233,7 @@ int findTotalPages(const String &folder)
     cachedFolder = folder;
     cachedCount = 0;
     storeCachedPageCount(folder, 0);
+    writeCachedPageCountSD(folder, 0);
     return 0;
   }
 
@@ -199,6 +261,7 @@ int findTotalPages(const String &folder)
   cachedFolder = folder;
   cachedCount = lo + 1;
   storeCachedPageCount(folder, cachedCount);
+  writeCachedPageCountSD(folder, cachedCount);
   return cachedCount;
 }
 
@@ -206,25 +269,35 @@ void saveProgress()
 {
   static unsigned long lastSaveMs = 0;
   unsigned long now = millis();
-  lastMangaPath = currentMangaPath;
-  lastPage = currentPage;
-  updateLastMangaName();
-  if (appState == STATE_READER) isLastReadManga = true;
-  else if (appState == STATE_TEXT_READER) isLastReadManga = false;
+  
+  if (appState == STATE_READER) {
+    lastMangaPath = currentMangaPath;
+    lastPage = currentPage;
+    updateLastMangaName();
+    isLastReadManga = true;
+  } else if (appState == STATE_TEXT_READER) {
+    isLastReadManga = false;
+  }
   
   if (now - lastSaveMs < 2000)
     return;
   lastSaveMs = now;
   prefs.begin("manga", false);
-  prefs.putString("lastPath", currentMangaPath);
-  prefs.putInt("lastPage", currentPage);
+  prefs.putString("lastPath", lastMangaPath);
+  prefs.putInt("lastPage", lastPage);
   prefs.putInt("lastStrip", currentStrip);
-  prefs.putBool("horizMode", horizontalMode);
+  prefs.putInt("orientMode", (int)orientationMode);
   prefs.putInt("fitMode", (int)fitMode);
   prefs.putString("lastBook", currentBookPath);
   prefs.putInt("lastTextPg", currentTextPage);
   prefs.putBool("lastIsManga", isLastReadManga);
   prefs.end();
+
+  // Save per-book progress
+  if (appState == STATE_READER && currentMangaPath.length() > 0)
+    saveBookProgress(currentMangaPath, currentPage, currentStrip);
+  else if (appState == STATE_TEXT_READER && currentBookPath.length() > 0)
+    saveBookProgress(currentBookPath, currentTextPage);
 }
 
 void loadConfig()
@@ -258,7 +331,12 @@ void loadProgress()
   lastMangaPath = prefs.getString("lastPath", "");
   lastPage = prefs.getInt("lastPage", 0);
   currentStrip = prefs.getInt("lastStrip", 0);
-  horizontalMode = prefs.getBool("horizMode", false);
+  if (prefs.isKey("orientMode")) {
+    orientationMode = (OrientationMode)prefs.getInt("orientMode", (int)ORIENT_PORTRAIT);
+  } else {
+    // Migration fallback
+    orientationMode = prefs.getBool("horizMode", false) ? ORIENT_LANDSCAPE : ORIENT_PORTRAIT;
+  }
   fitMode = (FitMode)prefs.getInt("fitMode", (int)FIT_SMART);
   currentBookPath = prefs.getString("lastBook", "");
   currentTextPage = prefs.getInt("lastTextPg", 0);
@@ -279,4 +357,64 @@ void updateLastMangaName()
     lastMangaName = lastMangaPath.substring(slash + 1);
   else
     lastMangaName = lastMangaPath;
+}
+
+// ── Per-book progress persistence ───────────────────────────────────
+// Manga: /manga/<folder>/.progress (contains "page\nstrip")
+// Books: /book/<filename>.progress (contains "page")
+
+static String getProgressPath(const String &path)
+{
+  if (path.startsWith(MANGA_ROOT))
+  {
+    // Manga folder: /manga/<folder>/.progress
+    return path + "/.progress";
+  }
+  else
+  {
+    // Text book: /book/<file>.progress
+    return path + ".progress";
+  }
+}
+
+int loadBookProgress(const String &path)
+{
+  String progPath = getProgressPath(path);
+  File f = SD.open(progPath.c_str(), FILE_READ);
+  if (!f)
+    return 0;
+  String val = f.readStringUntil('\n');
+  f.close();
+  val.trim();
+  int page = val.toInt();
+  if (page < 0) page = 0;
+  Serial.printf("Loaded per-book progress: %s → page %d\n", progPath.c_str(), page);
+  return page;
+}
+
+int loadBookProgressStrip(const String &path)
+{
+  String progPath = getProgressPath(path);
+  File f = SD.open(progPath.c_str(), FILE_READ);
+  if (!f)
+    return 0;
+  f.readStringUntil('\n'); // skip page line
+  String val = f.readStringUntil('\n');
+  f.close();
+  val.trim();
+  int strip = val.toInt();
+  if (strip < 0) strip = 0;
+  return strip;
+}
+
+void saveBookProgress(const String &path, int page, int strip)
+{
+  String progPath = getProgressPath(path);
+  File f = SD.open(progPath.c_str(), FILE_WRITE);
+  if (f)
+  {
+    f.println(page);
+    f.println(strip);
+    f.close();
+  }
 }

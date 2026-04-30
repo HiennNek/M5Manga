@@ -96,3 +96,11 @@ enum AppState
   STATE_WIFI,
   STATE_TEXT_READER
 };
+
+enum OrientationMode
+{
+  ORIENT_PORTRAIT,
+  ORIENT_LANDSCAPE,
+  ORIENT_AUTO,
+  ORIENT_COUNT
+};

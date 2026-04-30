@@ -561,8 +561,9 @@ void preloadPage(int page, int strip)
   setCpuFrequencyMhz(240);
   String path = makePagePath(currentMangaPath, page);
 
-  int screenW = horizontalMode ? 960 : 540;
-  int screenH = horizontalMode ? 540 : 960;
+  int rot = getActiveRotation();
+  int screenW = (rot % 2 == 1) ? 960 : 540;
+  int screenH = (rot % 2 == 1) ? 540 : 960;
 
   prepareSprite(nextPageSprite, screenW, screenH, 16, true);
   if (!nextPageSprite.getBuffer())
@@ -788,12 +789,12 @@ void drawMenu()
   M5.Display.setRotation(0);
   
   // Total items calculation depends on the active tab
-  // Index 0: BOOKMARKS, Index 1: FILES, Index 2+: Content
+  // Index 0: BOOKMARKS, Index 1+: Content
   int totalItems;
   if (currentMenuTab == TAB_COMIC)
-    totalItems = (int)mangaFolders.size() + 2;
+    totalItems = (int)mangaFolders.size() + 1;
   else
-    totalItems = (int)bookFiles.size() + 2;
+    totalItems = (int)bookFiles.size() + 1;
 
   int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
@@ -865,21 +866,9 @@ void drawMenu()
             menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2, y + THUMB_H + 10);
             menuCacheSprite.setTextDatum(top_left);
           }
-          else if (i == 1) // FILES (WiFi Server)
-          {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
-            int iconX = x + (THUMB_W - 96) / 2;
-            int iconY = y + (THUMB_H - 96) / 2;
-            menuCacheSprite.drawBitmap(iconX, iconY, file_material_icon, 96, 96, UI_FG);
-            menuCacheSprite.setFont(&fonts::DejaVu12);
-            menuCacheSprite.setTextColor(UI_FG, UI_BG);
-            menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("FILES", x + THUMB_W / 2, y + THUMB_H + 10);
-            menuCacheSprite.setTextDatum(top_left);
-          }
           else // Content
           {
-            int cIdx = i - 2;
+            int cIdx = i - 1;
             if (currentMenuTab == TAB_COMIC)
             {
               String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[cIdx], 0);
@@ -931,15 +920,19 @@ void drawMenu()
     }
   }
 
+  bool isDocTab = (currentMenuTab == TAB_DOCUMENT);
+  String currentResumeName = isDocTab ? currentBookPath : lastMangaName;
+  int currentResumePage = isDocTab ? currentTextPage : lastPage;
+
   if (menuCacheValid &&
-      (drawnLastMangaName != (isLastReadManga ? lastMangaName : currentBookPath) || 
-       drawnLastPage != (isLastReadManga ? lastPage : currentTextPage) ||
+      (drawnLastMangaName != currentResumeName || 
+       drawnLastPage != currentResumePage ||
        drawnLastMenuScroll != menuScroll))
   {
-    String resumeName = isLastReadManga ? lastMangaName : currentBookPath;
-    int resumePage = isLastReadManga ? lastPage : currentTextPage;
+    String resumeName = currentResumeName;
+    int resumePage = currentResumePage;
 
-    if (!isLastReadManga && resumeName.length() > 0) {
+    if (isDocTab && resumeName.length() > 0) {
         int lastSlash = resumeName.lastIndexOf('/');
         if (lastSlash >= 0) resumeName = resumeName.substring(lastSlash + 1);
     }
@@ -985,8 +978,8 @@ void drawMenu()
       int btnY = barY + 10;
       drawModernButton(menuCacheSprite, btnX, btnY, btnW, btnH, "RESUME", true);
     }
-    drawnLastMangaName = isLastReadManga ? lastMangaName : currentBookPath;
-    drawnLastPage = isLastReadManga ? lastPage : currentTextPage;
+    drawnLastMangaName = currentResumeName;
+    drawnLastPage = currentResumePage;
     drawnLastMenuScroll = menuScroll;
     forceFullMenuRedraw = true;
   }
@@ -1068,10 +1061,12 @@ void drawControlCenter()
   if (!gSprite.getBuffer())
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
-  int modW = 500;
-  int modH = 300;
-  int modX = (DISPLAY_W - modW) / 2;
-  int modY = (DISPLAY_H - modH) / 2;
+  
+  // Phone-like fast access menu at the top
+  int modW = DISPLAY_W - 40;
+  int modH = 220;
+  int modX = 20;
+  int modY = 40;
 
   // Drop shadow
   gSprite.fillRoundRect(modX + 6, modY + 6, modW, modH, UI_RADIUS, UI_SHADOW);
@@ -1084,31 +1079,65 @@ void drawControlCenter()
   gSprite.drawRoundRect(modX + 2, modY + 2, modW - 4, modH - 4, UI_RADIUS - 2,
                         UI_BORDER);
 
-  // Header
+  // Status Bar Line: Time & Date (Left), Battery (Right)
+  auto dt = M5.Rtc.getDateTime();
+  char timeStr[10];
+  char dateStr[15];
+  sprintf(timeStr, "%02d:%02d", dt.time.hours, dt.time.minutes);
+  sprintf(dateStr, "%02d-%02d-%04d", dt.date.date, dt.date.month, dt.date.year);
+
+  int topPad = modY + 25;
+  
   gSprite.setTextColor(UI_FG, UI_BG);
-  gSprite.setFont(&fonts::DejaVu24);
-  gSprite.setTextDatum(top_center);
-  gSprite.drawString("System Menu", modX + modW / 2, modY + 25);
   gSprite.setTextDatum(top_left);
-  gSprite.drawLine(modX, modY + 70, modX + modW, modY + 70, UI_BORDER);
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.drawString(timeStr, modX + 30, topPad);
+  
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.drawString(dateStr, modX + 30, topPad + 30);
 
   int bat = M5.Power.getBatteryLevel();
-  gSprite.setFont(&fonts::DejaVu18);
-  gSprite.setCursor(modX + 30, modY + 100);
-  gSprite.printf("Battery Level: %d%%", bat);
+  char batStr[10];
+  sprintf(batStr, "%d%%", bat);
+  
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.setTextDatum(top_right);
+  gSprite.drawString(batStr, modX + modW - 65, topPad);
+  
+  // Draw simple battery icon next to text
+  int batX = modX + modW - 63;
+  int batY = topPad + 4;
+  gSprite.drawRect(batX, batY, 30, 16, UI_FG);
+  gSprite.fillRect(batX + 30, batY + 4, 3, 8, UI_FG);
+  gSprite.fillRect(batX + 2, batY + 2, 26 * bat / 100, 12, UI_FG);
+  gSprite.setTextDatum(top_left);
 
-  int pW = modW - 60;
-  int pX = modX + 30;
-  int pY = modY + 130;
-  gSprite.drawRoundRect(pX, pY, pW, 40, UI_RADIUS, UI_BORDER);
-  gSprite.fillRoundRect(pX + 4, pY + 4, (pW - 8) * bat / 100, 32, UI_RADIUS - 2,
-                        UI_FG);
+  // Divider
+  gSprite.drawLine(modX, modY + 80, modX + modW, modY + 80, UI_BORDER);
 
-  int btnW = modW - 60;
-  int btnH = 60;
-  int btnX = modX + 30;
-  int btnY = modY + 210;
-  drawModernButton(gSprite, btnX, btnY, btnW, btnH, "SHUTDOWN", true);
+  // Quick Action 1: Shutdown (Circle button)
+  int btnR = 40;
+  int btnX1 = modX + 160;
+  int btnY = modY + 140;
+  
+  gSprite.fillCircle(btnX1, btnY, btnR, UI_ACCENT);
+  gSprite.drawCircle(btnX1, btnY, btnR, UI_BORDER);
+  gSprite.drawBitmap(btnX1 - 28, btnY - 28, power_material_icon, 56, 56, UI_FG);
+  
+  gSprite.setTextColor(UI_FG, UI_BG);
+  gSprite.setFont(&fonts::DejaVu12);
+  gSprite.setTextDatum(top_center);
+  gSprite.drawString("Shutdown", btnX1, btnY + btnR + 15);
+
+  // Quick Action 2: Settings / Files (Circle button)
+  int btnX2 = modX + 340;
+  
+  gSprite.fillCircle(btnX2, btnY, btnR, UI_ACCENT);
+  gSprite.drawCircle(btnX2, btnY, btnR, UI_BORDER);
+  gSprite.drawBitmap(btnX2 - 28, btnY - 28, settings_material_icon, 56, 56, UI_FG);
+  
+  gSprite.drawString("Setting", btnX2, btnY + btnR + 15);
+  gSprite.setTextDatum(top_left);
 
   M5.Display.startWrite();
   gSprite.pushSprite(0, 0, TFT_MAGENTA);
@@ -1184,7 +1213,7 @@ void drawBookConfig()
     return;
   gSprite.fillScreen(TFT_MAGENTA); // Use magenta as transparent color
   int modW = 460;
-  int modH = (appState == STATE_TEXT_READER) ? 350 : 640;
+  int modH = (appState == STATE_TEXT_READER) ? 420 : 710;
   int modX = (DISPLAY_W - modW) / 2;
   int modY = (DISPLAY_H - modH) / 2;
 
@@ -1208,29 +1237,40 @@ void drawBookConfig()
   gSprite.drawLine(modX, modY + 70, modX + modW, modY + 70, UI_BORDER);
 
   int barY = modY + 85;
-  gSprite.drawRoundRect(modX + 20, barY, modW - 40, 80, UI_RADIUS, UI_BORDER);
+  gSprite.drawRoundRect(modX + 20, barY, modW - 40, 150, UI_RADIUS, UI_BORDER);
   gSprite.setFont(&fonts::DejaVu24);
-  gSprite.setCursor(modX + 45, barY + 25);
+  gSprite.setCursor(modX + 50, barY + 25);
   gSprite.print("<<");
-  gSprite.setCursor(modX + 115, barY + 25);
+  gSprite.setCursor(modX + 120, barY + 25);
   gSprite.print("<");
   String pg;
+  int total;
   if (appState == STATE_TEXT_READER)
   {
-    int total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
+    total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
     pg = String(bookConfigPendingPage + 1) + " / " + String(total);
   }
-  else
-    pg = String(bookConfigPendingPage + 1) + " / " + String(totalPages);
+  else {
+    total = totalPages;
+    pg = String(bookConfigPendingPage + 1) + " / " + String(total);
+  }
   int pgW = pg.length() * 14;
   gSprite.setCursor(modX + (modW - pgW) / 2, barY + 25);
   gSprite.print(pg);
-  gSprite.setCursor(modX + modW - 135, barY + 25);
+  gSprite.setCursor(modX + modW - 132, barY + 25);
   gSprite.print(">");
-  gSprite.setCursor(modX + modW - 85, barY + 25);
+  gSprite.setCursor(modX + modW - 75, barY + 25);
   gSprite.print(">>");
 
-  gSprite.drawLine(modX, modY + 180, modX + modW, modY + 180, UI_BORDER);
+  // Second row: First / Last
+  gSprite.drawLine(modX + 20, barY + 75, modX + modW - 20, barY + 75, UI_BORDER);
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.setCursor(modX + 60, barY + 100);
+  gSprite.print("First page");
+  gSprite.setCursor(modX + modW - 150, barY + 100);
+  gSprite.print("Last page");
+
+  gSprite.drawLine(modX, modY + 250, modX + modW, modY + 250, UI_BORDER);
 
   int btnW = modW - 60;
   int btnX = modX + 30;
@@ -1240,30 +1280,32 @@ void drawBookConfig()
 
   if (appState != STATE_TEXT_READER)
   {
-    int btnY0 = modY + 190;
+    int btnY0 = modY + 260;
     String ditherMsg = String("DITHER: ") + ditherModeName();
     drawModernButton(gSprite, btnX, btnY0, btnW, btnH, ditherMsg.c_str(), false);
 
-    int btnY1 = modY + 260;
+    int btnY1 = modY + 330;
     String contrastMsg = String("CONTRAST: ") + contrastPresetName();
     drawModernButton(gSprite, btnX, btnY1, btnW, btnH, contrastMsg.c_str(),
                      false);
 
-    int btnYMode = modY + 330;
-    String modeMsg = horizontalMode ? "MODE: HORIZONTAL" : "MODE: VERTICAL";
+    int btnYMode = modY + 400;
+    String modeMsg = "MODE: VERTICAL";
+    if (orientationMode == ORIENT_LANDSCAPE) modeMsg = "MODE: HORIZONTAL";
+    else if (orientationMode == ORIENT_AUTO) modeMsg = "MODE: AUTO";
     drawModernButton(gSprite, btnX, btnYMode, btnW, btnH, modeMsg.c_str(), false);
 
-    int btnYFit = modY + 400;
+    int btnYFit = modY + 470;
     String fitMsg = String("FIT: ") + fitModeName();
     drawModernButton(gSprite, btnX, btnYFit, btnW, btnH, fitMsg.c_str(), false);
 
-    btnYBookmark = modY + 470;
-    btnYReturn = modY + 540;
+    btnYBookmark = modY + 540;
+    btnYReturn = modY + 610;
   }
   else
   {
-    btnYBookmark = modY + 190;
-    btnYReturn = modY + 260;
+    btnYBookmark = modY + 260;
+    btnYReturn = modY + 330;
   }
 
   drawModernButton(gSprite, btnX, btnYBookmark, btnW, btnH, "BOOKMARK PAGE", false);
@@ -1297,8 +1339,21 @@ void drawBookmarks()
     gSprite.printf("< %s", t.c_str());
   }
   int itemsPerPage = (DISPLAY_H - 200) / 90;
+  
+  bool isDocument = (currentMenuTab == TAB_DOCUMENT);
+  auto uniqueFolders = getUniqueBookmarkFolders(isDocument);
+  
   int totalItems = 0;
-  if (bookmarks.empty())
+  if (selectedBookmarkFolder == "") {
+    totalItems = uniqueFolders.size();
+  } else {
+    for (const auto &b : bookmarks) {
+      if (b.folder == selectedBookmarkFolder)
+        totalItems++;
+    }
+  }
+
+  if (totalItems == 0)
   {
     gSprite.setTextColor(UI_FG, UI_BG);
     gSprite.setFont(&fonts::DejaVu18);
@@ -1311,8 +1366,6 @@ void drawBookmarks()
     int itemH = 80;
     if (selectedBookmarkFolder == "")
     {
-      auto uniqueFolders = getUniqueBookmarkFolders();
-      totalItems = uniqueFolders.size();
       int count = 0;
       for (int i = 0; i < (int)uniqueFolders.size(); i++)
       {
@@ -1349,7 +1402,6 @@ void drawBookmarks()
       {
         if (bookmarks[i].folder != selectedBookmarkFolder)
           continue;
-        totalItems++;
         if (folderItemIdx < bookmarkScroll)
         {
           folderItemIdx++;
@@ -1451,7 +1503,7 @@ void drawPage()
   setCpuFrequencyMhz(240);
 
   // Set rotation based on mode
-  M5.Display.setRotation(horizontalMode ? 1 : 0);
+  M5.Display.setRotation(getActiveRotation());
   int screenW = M5.Display.width();
   int screenH = M5.Display.height();
 
@@ -2182,7 +2234,9 @@ void openBook(int idx)
   if (idx < 0 || idx >= (int)bookFiles.size())
     return;
   String path = String(BOOK_ROOT) + "/" + bookFiles[idx];
-  openBookPath(path, 0);
+  // Load per-book saved progress
+  int savedPage = loadBookProgress(path);
+  openBookPath(path, savedPage);
 }
 
 void openBookPath(const String &path, int page)
@@ -2205,10 +2259,21 @@ void openBookPath(const String &path, int page)
   if (loadTextIndex(path)) {
     Serial.printf("Text index loaded: %d pages cached, jumping to page %d\n",
                   (int)textPageOffsets.size(), page);
+    if (currentTextPage >= (int)textPageOffsets.size()) 
+      currentTextPage = (int)textPageOffsets.size() - 1;
   }
+  if (currentTextPage < 0) currentTextPage = 0;
 
   appState = STATE_TEXT_READER;
   currentEpdMode = epd_mode_t::epd_text;
   needRedraw = true;
   saveProgress();
+}
+
+void quickScreenRefresh() // Unused, leave here for future use
+{
+  M5.Display.startWrite();
+  M5.Display.clear(TFT_BLACK);
+  M5.Display.display();
+  M5.Display.endWrite();
 }

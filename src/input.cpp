@@ -5,6 +5,7 @@
 #include "storage.h"
 #include "ui.h"
 #include "wifi_server.h"
+#include "icon.h"
 #include <algorithm>
 
 // ── File-local helpers ──────────────────────────────────────────────
@@ -125,7 +126,8 @@ void handleBookmarksTouch(const m5::touch_detail_t &t)
   int itemsPerPage = (M5.Display.height() - 200) / 90;
 
   // Count total items for pagination
-  auto uniqueFolders = getUniqueBookmarkFolders();
+  bool isDocument = (currentMenuTab == TAB_DOCUMENT);
+  auto uniqueFolders = getUniqueBookmarkFolders(isDocument);
   int totalItems;
   if (selectedBookmarkFolder == "")
   {
@@ -322,31 +324,49 @@ void handleControlTouch(const m5::touch_detail_t &t)
 
   int tapX = t.x;
   int tapY = t.y;
-  int modW = 500;
-  int modH = 300;
-  int modX = (M5.Display.width() - modW) / 2;
-  int modY = (M5.Display.height() - modH) / 2;
+  int modW = M5.Display.width() - 40;
+  int modH = 220;
+  int modX = 20;
+  int modY = 40;
 
-  int btnW = modW - 60;
-  int btnH = 65;
-  int btnX = modX + 30;
-  int btnY = modY + 210;
+  int btnR = 40;
+  int btnX1 = modX + 160;
+  int btnX2 = modX + 340;
+  int btnY = modY + 140;
 
-  if (tapX > btnX && tapX < btnX + btnW && tapY > btnY && tapY < btnY + btnH)
+  // Check if tap is inside Shutdown circle
+  int dx1 = tapX - btnX1;
+  int dy1 = tapY - btnY;
+  if (dx1 * dx1 + dy1 * dy1 <= btnR * btnR)
   {
     M5.Display.startWrite();
-    M5.Display.fillRoundRect(btnX, btnY, btnW, btnH, UI_RADIUS, UI_BG);
-    M5.Display.drawRoundRect(btnX, btnY, btnW, btnH, UI_RADIUS, UI_BORDER);
-    M5.Display.setTextColor(UI_FG, UI_BG);
-    M5.Display.setFont(&fonts::DejaVu18);
-    M5.Display.setTextDatum(middle_center);
-    M5.Display.drawString("SHUTDOWN", btnX + btnW / 2, btnY + btnH / 2);
-    M5.Display.setTextDatum(top_left);
+    M5.Display.fillCircle(btnX1, btnY, btnR, UI_FG);
+    M5.Display.drawCircle(btnX1, btnY, btnR, UI_BORDER);
+    M5.Display.drawBitmap(btnX1 - 28, btnY - 28, power_material_icon, 56, 56, UI_BG);
     M5.Display.display();
     M5.Display.endWrite();
     delay(50);
 
     systemShutdown();
+    return;
+  }
+
+  // Check if tap is inside Settings/Files circle
+  int dx2 = tapX - btnX2;
+  int dy2 = tapY - btnY;
+  if (dx2 * dx2 + dy2 * dy2 <= btnR * btnR)
+  {
+    M5.Display.startWrite();
+    M5.Display.fillCircle(btnX2, btnY, btnR, UI_FG);
+    M5.Display.drawCircle(btnX2, btnY, btnR, UI_BORDER);
+    M5.Display.drawBitmap(btnX2 - 28, btnY - 28, settings_material_icon, 56, 56, UI_BG);
+    M5.Display.display();
+    M5.Display.endWrite();
+    delay(50);
+
+    controlMenuOpen = false;
+    appState = STATE_WIFI;
+    requestRedraw();
     return;
   }
 
@@ -369,9 +389,9 @@ void handleMenuTouch(const m5::touch_detail_t &t)
 
   int totalItems;
   if (currentMenuTab == TAB_COMIC)
-    totalItems = (int)mangaFolders.size() + 2;
+    totalItems = (int)mangaFolders.size() + 1;
   else
-    totalItems = (int)bookFiles.size() + 2;
+    totalItems = (int)bookFiles.size() + 1;
 
   // Tab switching (top 80px)
   if (t.y < 80)
@@ -428,10 +448,11 @@ void handleMenuTouch(const m5::touch_detail_t &t)
   int barX = 20;
   int barY = M5.Display.height() - 85;
 
-  String resumeName = isLastReadManga ? lastMangaName : currentBookPath;
-  int resumePage = isLastReadManga ? lastPage : currentTextPage;
+  bool isDocTab = (currentMenuTab == TAB_DOCUMENT);
+  String resumeName = isDocTab ? currentBookPath : lastMangaName;
+  int resumePage = isDocTab ? currentTextPage : lastPage;
 
-  if (!isLastReadManga && resumeName.length() > 0) {
+  if (isDocTab && resumeName.length() > 0) {
       int lastSlash = resumeName.lastIndexOf('/');
       if (lastSlash >= 0) resumeName = resumeName.substring(lastSlash + 1);
   }
@@ -458,7 +479,7 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     M5.Display.endWrite();
     delay(50);
 
-    if (isLastReadManga)
+    if (!isDocTab)
     {
       openMangaPath(lastMangaPath, lastPage);
     }
@@ -495,17 +516,12 @@ void handleMenuTouch(const m5::touch_detail_t &t)
       bookmarkScroll = 0;
       requestRedraw();
     }
-    else if (idx == 1)
-    {
-      appState = STATE_WIFI;
-      requestRedraw();
-    }
     else
     {
       if (currentMenuTab == TAB_COMIC)
-        openManga(idx - 2);
+        openManga(idx - 1);
       else
-        openBook(idx - 2);
+        openBook(idx - 1);
     }
   }
   else
@@ -539,7 +555,7 @@ void handleReaderTouch(const m5::touch_detail_t &t)
     if (potentialLongPress && !isMagnifierActive &&
         (millis() - pressStart > LONG_PRESS_MS))
     {
-      if (horizontalMode)
+      if (getActiveRotation() % 2 == 1)
       {
         potentialLongPress = false;
       }
@@ -596,13 +612,24 @@ void handleReaderTouch(const m5::touch_detail_t &t)
         return;
       }
 
-      // 2. Tap to turn page (if not a long press)
-      if (millis() - pressStart < LONG_PRESS_MS)
+      // 2. Tap or Flick to turn page
+      int dx = t.distanceX();
+      bool isForward = false;
+      bool isBackward = false;
+
+      if (dx < -SWIPE_HORIZ_MIN) isForward = true;
+      else if (dx > SWIPE_HORIZ_MIN) isBackward = true;
+      else if (millis() - pressStart < LONG_PRESS_MS)
+      {
+        if (t.x >= M5.Display.width() / 2) isForward = true;
+        else isBackward = true;
+      }
+
+      if (isForward || isBackward)
       {
         if (stripsPerPage > 1)
         {
-          int zoneW = M5.Display.width() / 2;
-          if (t.x >= zoneW)
+          if (isForward)
           {
             currentStrip++;
             if (currentStrip >= stripsPerPage)
@@ -616,7 +643,7 @@ void handleReaderTouch(const m5::touch_detail_t &t)
               }
               else
               {
-                currentStrip = stripsPerPage - 1; // Stay at last strip
+                currentStrip = stripsPerPage - 1;
               }
             }
             else
@@ -625,7 +652,7 @@ void handleReaderTouch(const m5::touch_detail_t &t)
               saveProgress();
             }
           }
-          else
+          else // isBackward
           {
             currentStrip--;
             if (currentStrip < 0)
@@ -639,7 +666,7 @@ void handleReaderTouch(const m5::touch_detail_t &t)
               }
               else
               {
-                currentStrip = 0; // Stay at first strip
+                currentStrip = 0;
               }
             }
             else
@@ -651,8 +678,7 @@ void handleReaderTouch(const m5::touch_detail_t &t)
         }
         else
         {
-          int zoneW = M5.Display.width() / 2;
-          if (t.x >= zoneW)
+          if (isForward)
           {
             if (currentPage < totalPages - 1)
             {
@@ -662,7 +688,7 @@ void handleReaderTouch(const m5::touch_detail_t &t)
               saveProgress();
             }
           }
-          else
+          else // isBackward
           {
             if (currentPage > 0)
             {
@@ -688,7 +714,7 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   int tapX = t.x;
   int tapY = t.y;
   int modW = 460;
-  int modH = (appState == STATE_TEXT_READER) ? 350 : 640;
+  int modH = (appState == STATE_TEXT_READER) ? 420 : 710;
   int modX = (M5.Display.width() - modW) / 2;
   int modY = (M5.Display.height() - modH) / 2;
 
@@ -719,18 +745,40 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     return;
   }
 
-  // Page stepper region
+  // Page stepper region (two rows)
   int barY = modY + 90;
-  if (tapY >= barY && tapY <= barY + 80)
+  if (tapY >= barY && tapY <= barY + 150)
   {
-    if (tapX < modX + 100)
-      adjustPendingPage(-10);
-    else if (tapX < modX + 180)
-      adjustPendingPage(-1);
-    else if (tapX > modX + modW - 100)
-      adjustPendingPage(+10);
-    else if (tapX > modX + modW - 180)
-      adjustPendingPage(+1);
+    if (tapY <= barY + 75)
+    {
+      // Row 1: << < > >>
+      if (tapX < modX + 100)
+        adjustPendingPage(-10);
+      else if (tapX < modX + 180)
+        adjustPendingPage(-1);
+      else if (tapX > modX + modW - 100)
+        adjustPendingPage(+10);
+      else if (tapX > modX + modW - 180)
+        adjustPendingPage(+1);
+    }
+    else
+    {
+      // Row 2: F FIRST / L LAST
+      if (tapX < modX + modW / 2)
+      {
+        bookConfigPendingPage = 0;
+      }
+      else
+      {
+        int total;
+        if (appState == STATE_TEXT_READER)
+          total = std::max((int)textPageOffsets.size(), estimatedTotalPages);
+        else
+          total = totalPages;
+        bookConfigPendingPage = std::max(0, total - 1);
+      }
+      requestRedraw();
+    }
     return;
   }
 
@@ -741,7 +789,7 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   if (appState != STATE_TEXT_READER)
   {
     // 1. Dithering Toggle
-    int btnY0 = modY + 190;
+    int btnY0 = modY + 260;
     if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY0 &&
         tapY <= btnY0 + btnH)
     {
@@ -752,7 +800,7 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     }
 
     // 2. Contrast Preset
-    int btnY1 = modY + 260;
+    int btnY1 = modY + 330;
     if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnY1 &&
         tapY <= btnY1 + btnH)
     {
@@ -763,18 +811,18 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
     }
 
     // 2.5 Mode Toggle
-    int btnYMode = modY + 330;
+    int btnYMode = modY + 400;
     if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYMode &&
         tapY <= btnYMode + btnH)
     {
-      horizontalMode = !horizontalMode;
+      orientationMode = (OrientationMode)((orientationMode + 1) % ORIENT_COUNT);
       isNextPageReady = false;
       requestRedraw();
       return;
     }
 
     // 3. FIT Mode Toggle
-    int btnYFit = modY + 400;
+    int btnYFit = modY + 470;
     if (tapX >= btnX && tapX <= btnX + btnW && tapY >= btnYFit &&
         tapY <= btnYFit + btnH)
     {
@@ -788,13 +836,13 @@ void handleBookConfigTouch(const m5::touch_detail_t &t)
   int btnYBookmark, btnYReturn;
   if (appState == STATE_TEXT_READER)
   {
-    btnYBookmark = modY + 190;
-    btnYReturn = modY + 260;
+    btnYBookmark = modY + 260;
+    btnYReturn = modY + 330;
   }
   else
   {
-    btnYBookmark = modY + 470;
-    btnYReturn = modY + 540;
+    btnYBookmark = modY + 540;
+    btnYReturn = modY + 610;
   }
 
   // 4. Bookmark Page
@@ -887,9 +935,19 @@ void handleTextTouch(const m5::touch_detail_t &t)
     return;
   }
 
-  // 3. Taps for page turns
-  int zoneW = screenW / 2;
-  if (tapX > zoneW || dx > SWIPE_HORIZ_MIN)
+  // 3. Taps and Flicks for page turns
+  bool isForward = false;
+  bool isBackward = false;
+
+  if (dx < -SWIPE_HORIZ_MIN) isForward = true;
+  else if (dx > SWIPE_HORIZ_MIN) isBackward = true;
+  else 
+  {
+    if (tapX > screenW / 2) isForward = true;
+    else isBackward = true;
+  }
+
+  if (isForward)
   {
     // Next Page
     if (currentTextPage + 1 < (int)textPageOffsets.size())
@@ -899,7 +957,7 @@ void handleTextTouch(const m5::touch_detail_t &t)
       saveProgress();
     }
   }
-  else if (tapX <= zoneW || dx < -SWIPE_HORIZ_MIN)
+  else if (isBackward)
   {
     // Prev Page
     if (currentTextPage > 0)

@@ -26,3 +26,4 @@ void drawError(const char *msg);
 void systemShutdown();
 void drawModernButton(LGFX_Sprite &sprite, int x, int y, int w, int h,
                       const char *text, bool isPrimary = false);
+void quickScreenRefresh();

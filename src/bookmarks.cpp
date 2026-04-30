@@ -60,14 +60,18 @@ void deleteBookmark(int idx)
   saveBookmarks();
 }
 
-std::vector<String> getUniqueBookmarkFolders()
+std::vector<String> getUniqueBookmarkFolders(bool isDocument)
 {
   std::vector<String> folders;
   for (const auto &b : bookmarks)
   {
-    if (std::find(folders.begin(), folders.end(), b.folder) == folders.end())
+    bool isDoc = b.folder.endsWith(".txt") || b.folder.endsWith(".TXT");
+    if (isDoc == isDocument)
     {
-      folders.push_back(b.folder);
+      if (std::find(folders.begin(), folders.end(), b.folder) == folders.end())
+      {
+        folders.push_back(b.folder);
+      }
     }
   }
   std::sort(folders.begin(), folders.end());

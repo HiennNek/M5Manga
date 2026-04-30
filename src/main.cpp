@@ -16,7 +16,7 @@ void setup()
   auto cfg = M5.config();
   cfg.internal_spk = false;
   cfg.internal_mic = false;
-  cfg.internal_imu = false;
+  cfg.internal_imu = true;
   cfg.clear_display = false; // Prevent automatic screen clear on boot
   M5.begin(cfg);
 
@@ -33,7 +33,7 @@ void setup()
   loadConfig();
   loadProgress();
   
-  M5.Display.setRotation(horizontalMode ? 1 : 0);
+  M5.Display.setRotation(getActiveRotation());
   M5.Display.setColorDepth(8);
   M5.Display.setEpdMode(epd_mode_t::epd_fast);
 
@@ -44,7 +44,19 @@ void setup()
   scanBookFiles();
   loadBookmarks();
 
-  needRedraw = true;
+  // Auto-resume last read book (Kindle-like behavior)
+  if (isLastReadManga && lastMangaPath.length() > 0)
+  {
+    openMangaPath(lastMangaPath, lastPage);
+  }
+  else if (!isLastReadManga && currentBookPath.length() > 0)
+  {
+    openBookPath(currentBookPath, currentTextPage);
+  }
+  else
+  {
+    needRedraw = true;
+  }
 }
 
 void loop()
@@ -53,6 +65,19 @@ void loop()
   if (M5.Touch.getCount() > 0)
   {
     lastInteractionMs = millis();
+  }
+
+  // Handle auto-rotation in manga reader
+  if (appState == STATE_READER && orientationMode == ORIENT_AUTO && !controlMenuOpen && !bookConfigOpen)
+  {
+    static int lastRot = -1;
+    int currentRot = getActiveRotation();
+    if (lastRot != -1 && currentRot != lastRot)
+    {
+      needRedraw = true;
+      isNextPageReady = false; // Invalidate cache for new orientation
+    }
+    lastRot = currentRot;
   }
 
   if (appState == STATE_WIFI)
@@ -117,13 +142,16 @@ void openManga(int idx)
   if (idx < 0 || idx >= (int)mangaFolders.size())
     return;
   String path = String(MANGA_ROOT) + "/" + mangaFolders[idx];
-  openMangaPath(path, 0);
+  // Load per-book saved progress
+  int savedPage = loadBookProgress(path);
+  int savedStrip = loadBookProgressStrip(path);
+  openMangaPath(path, savedPage);
+  currentStrip = savedStrip;
 }
 
 void openMangaPath(const String &path, int page)
 {
   currentMangaPath = path;
-  currentPage = page;
 
   M5.Display.fillScreen(TFT_WHITE);
   M5.Display.setFont(&fonts::DejaVu18);
@@ -135,17 +163,22 @@ void openMangaPath(const String &path, int page)
   setCpuFrequencyMhz(240);
   unsigned long t0 = millis();
   totalPages = findTotalPages(currentMangaPath);
-  Serial.printf("Binary search found %d pages in %lu ms\n", totalPages,
-                millis() - t0);
+  Serial.printf("Found %d pages in %lu ms\n", totalPages, millis() - t0);
 
   if (totalPages == 0)
   {
     drawError("No images found.\nExpected: m5_0000.jpg ...");
     delay(2500);
+    appState = STATE_MENU;
     currentEpdMode = epd_mode_t::epd_fast;
     needRedraw = true;
     return;
   }
+
+  // Clamp page to valid range
+  if (page >= totalPages) page = totalPages - 1;
+  if (page < 0) page = 0;
+  currentPage = page;
 
   saveProgress();
   setCpuFrequencyMhz(80);
