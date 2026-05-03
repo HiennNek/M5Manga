@@ -2,11 +2,12 @@
 #include <M5Unified.h>
 
 AppState appState = STATE_MENU;
+AlarmConfig alarmConfig = {0, 0, 1, 1, 2026, false};
 std::vector<String> mangaFolders;
 std::vector<int> mangaPageCounts;
 std::vector<String> bookFiles;
-int menuSelected = 0;
-int menuScroll = 0;
+int menuSelecteds[3] = {0, 0, 0};
+int menuScrolls[3] = {0, 0, 0};
 int bookmarkScroll = 0;
 
 MenuTab currentMenuTab = TAB_COMIC;
@@ -38,9 +39,9 @@ int stripOverlapPx = 20;
 Preferences prefs;
 LGFX_Sprite gSprite(&M5.Display);
 LGFX_Sprite nextPageSprite(&M5.Display);
-LGFX_Sprite menuCacheSprite(&M5.Display);
-int lastDrawnMenuScroll = -1;
-bool menuCacheValid = false;
+LGFX_Sprite menuCacheSprites[3] = {LGFX_Sprite(&M5.Display), LGFX_Sprite(&M5.Display), LGFX_Sprite(&M5.Display)};
+int lastDrawnMenuScrolls[3] = {-1, -1, -1};
+bool menuCacheValids[3] = {false, false, false};
 String lastMangaPath = "";
 int lastPage = 0;
 String lastMangaName = "";

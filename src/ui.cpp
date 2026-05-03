@@ -592,6 +592,17 @@ void preloadPage(int page, int strip)
       int imgW = jpeg.getWidth();
       int imgH = jpeg.getHeight();
       
+      // OPTIMIZATION: If next image is larger than native resolution,
+      // dont save it in spram (disable insta-page-turn) to save memory.
+      if (imgW > screenW || imgH > screenH)
+      {
+        Serial.printf("Next page [%d] is large (%dx%d), skipping preload to save PSRAM.\n", page + 1, imgW, imgH);
+        isNextPageReady = false;
+        nextPageSprite.deleteSprite();
+        jpeg.close();
+        return;
+      }
+      
       static LGFX_Sprite fullPageSprite(&M5.Display);
       prepareSprite(fullPageSprite, imgW, imgH, 16, true);
       
@@ -787,14 +798,21 @@ void drawMenu()
   static int drawnLastMenuScroll = -1;
 
   M5.Display.setRotation(0);
+  int &menuScroll = menuScrolls[currentMenuTab];
+  int &menuSelected = menuSelecteds[currentMenuTab];
+  LGFX_Sprite &menuCacheSprite = menuCacheSprites[currentMenuTab];
+  bool &menuCacheValid = menuCacheValids[currentMenuTab];
+  int &lastDrawnMenuScroll = lastDrawnMenuScrolls[currentMenuTab];
   
   // Total items calculation depends on the active tab
   // Index 0: BOOKMARKS, Index 1+: Content
   int totalItems;
   if (currentMenuTab == TAB_COMIC)
     totalItems = (int)mangaFolders.size() + 1;
-  else
+  else if (currentMenuTab == TAB_DOCUMENT)
     totalItems = (int)bookFiles.size() + 1;
+  else // TAB_APP
+    totalItems = 1; // Just Alarm for now
 
   int end = std::min(totalItems, menuScroll + MENU_VISIBLE);
 
@@ -806,7 +824,7 @@ void drawMenu()
       menuCacheSprite.fillScreen(UI_BG);
       
       // Draw Tabs
-      int tabW = DISPLAY_W / 2;
+      int tabW = DISPLAY_W / 3;
       int tabH = 80;
       
       // Comic Tab
@@ -817,7 +835,7 @@ void drawMenu()
         menuCacheSprite.drawRect(0, 0, tabW, tabH, UI_BORDER);
         menuCacheSprite.setTextColor(UI_FG, UI_BG);
       }
-      menuCacheSprite.setFont(&fonts::DejaVu24);
+      menuCacheSprite.setFont(&fonts::DejaVu18);
       menuCacheSprite.setTextDatum(middle_center);
       menuCacheSprite.drawString("Comic", tabW / 2, tabH / 2);
 
@@ -830,6 +848,16 @@ void drawMenu()
         menuCacheSprite.setTextColor(UI_FG, UI_BG);
       }
       menuCacheSprite.drawString("Document", tabW + tabW / 2, tabH / 2);
+
+      // App Tab
+      if (currentMenuTab == TAB_APP) {
+        menuCacheSprite.fillRect(tabW * 2, 0, tabW, tabH, UI_FG);
+        menuCacheSprite.setTextColor(UI_BG, UI_FG);
+      } else {
+        menuCacheSprite.drawRect(tabW * 2, 0, tabW, tabH, UI_BORDER);
+        menuCacheSprite.setTextColor(UI_FG, UI_BG);
+      }
+      menuCacheSprite.drawString("App", tabW * 2 + tabW / 2, tabH / 2);
       
       menuCacheSprite.setTextDatum(top_left);
       menuCacheSprite.drawLine(0, tabH, DISPLAY_W, tabH, UI_BORDER);
@@ -851,64 +879,96 @@ void drawMenu()
           int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
           int y = GRID_Y_TOP + row * GRID_ROW_H;
 
-          menuCacheSprite.fillRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BG);
-          menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BORDER);
-
-          if (i == 0) // BOOKMARKS
+          if (currentMenuTab != TAB_APP)
           {
-            menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
-            int iconX = x + (THUMB_W - 96) / 2;
-            int iconY = y + (THUMB_H - 96) / 2;
-            menuCacheSprite.drawBitmap(iconX, iconY, bookmarks_material_icon, 96, 96, UI_FG);
-            menuCacheSprite.setFont(&fonts::DejaVu12);
-            menuCacheSprite.setTextColor(UI_FG, UI_BG);
-            menuCacheSprite.setTextDatum(top_center);
-            menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2, y + THUMB_H + 10);
-            menuCacheSprite.setTextDatum(top_left);
+            menuCacheSprite.fillRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BG);
+            menuCacheSprite.drawRoundRect(x, y, THUMB_W, THUMB_H, UI_RADIUS, UI_BORDER);
           }
-          else // Content
+
+          if (currentMenuTab == TAB_APP)
           {
-            int cIdx = i - 1;
-            if (currentMenuTab == TAB_COMIC)
+            if (i == 0) // ALARM
             {
-              String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[cIdx], 0);
-              File coverFile = SD.open(coverPath.c_str());
-              if (coverFile)
-              {
-                drawThumbnail(menuCacheSprite, coverFile, x + 2, y + 2, THUMB_W - 4, THUMB_H - 4);
-                coverFile.close();
-              }
-              else
-              {
-                menuCacheSprite.setTextColor(UI_FG, UI_BG);
-                menuCacheSprite.setFont(&fonts::DejaVu12);
-                menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
-                menuCacheSprite.print("NO COVER");
-              }
-              String title = mangaFolders[cIdx];
-              if (title.length() > 22) title = title.substring(0, 20) + "...";
-              
-              menuCacheSprite.setFont(&fonts::DejaVu12);
-              menuCacheSprite.setTextColor(UI_FG, UI_BG);
-              menuCacheSprite.setTextDatum(top_center);
-              menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
-              menuCacheSprite.setTextDatum(top_left);
+               // Make it square (using THUMB_W for both dimensions)
+               int squareSize = THUMB_W - 20;
+               menuCacheSprite.fillRoundRect(x + 10, y + 10, squareSize, squareSize, UI_RADIUS, UI_ACCENT);
+               menuCacheSprite.drawRoundRect(x + 10, y + 10, squareSize, squareSize, UI_RADIUS, UI_BORDER);
+               
+               // Alarm icon placeholder (thick clock) centered in the square
+               int cx = x + THUMB_W / 2;
+               int cy = y + THUMB_W / 2;
+               for (int r = 39; r <= 41; r++) menuCacheSprite.drawCircle(cx, cy, r, UI_FG);
+               // Hour hand (thick)
+               menuCacheSprite.fillRect(cx - 2, cy - 30, 5, 32, UI_FG);
+               // Minute hand (thick)
+               menuCacheSprite.fillRect(cx - 2, cy - 2, 25, 5, UI_FG);
+               
+               menuCacheSprite.setFont(&fonts::DejaVu12);
+               menuCacheSprite.setTextColor(UI_FG, UI_BG);
+               menuCacheSprite.setTextDatum(top_center);
+               // Position text below the square icon
+               menuCacheSprite.drawString("ALARM", x + THUMB_W / 2, y + THUMB_W + 10);
+               menuCacheSprite.setTextDatum(top_left);
             }
-            else // TAB_DOCUMENT
+          }
+          else
+          {
+            if (i == 0) // BOOKMARKS
             {
               menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
               int iconX = x + (THUMB_W - 96) / 2;
               int iconY = y + (THUMB_H - 96) / 2;
-              menuCacheSprite.drawBitmap(iconX, iconY, book_material_icon, 96, 96, UI_FG);
-              
-              String title = bookFiles[cIdx];
-              if (title.length() > 22) title = title.substring(0, 20) + "...";
-
+              menuCacheSprite.drawBitmap(iconX, iconY, bookmarks_material_icon, 96, 96, UI_FG);
               menuCacheSprite.setFont(&fonts::DejaVu12);
               menuCacheSprite.setTextColor(UI_FG, UI_BG);
               menuCacheSprite.setTextDatum(top_center);
-              menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+              menuCacheSprite.drawString("BOOKMARKS", x + THUMB_W / 2, y + THUMB_H + 10);
               menuCacheSprite.setTextDatum(top_left);
+            }
+            else // Content
+            {
+              int cIdx = i - 1;
+              if (currentMenuTab == TAB_COMIC)
+              {
+                String coverPath = makePagePath(String(MANGA_ROOT) + "/" + mangaFolders[cIdx], 0);
+                File coverFile = SD.open(coverPath.c_str());
+                if (coverFile)
+                {
+                  drawThumbnail(menuCacheSprite, coverFile, x + 2, y + 2, THUMB_W - 4, THUMB_H - 4);
+                  coverFile.close();
+                }
+                else
+                {
+                  menuCacheSprite.setTextColor(UI_FG, UI_BG);
+                  menuCacheSprite.setFont(&fonts::DejaVu12);
+                  menuCacheSprite.setCursor(x + 10, y + THUMB_H / 2);
+                  menuCacheSprite.print("NO COVER");
+                }
+                String title = mangaFolders[cIdx];
+                if (title.length() > 22) title = title.substring(0, 20) + "...";
+                
+                menuCacheSprite.setFont(&fonts::DejaVu12);
+                menuCacheSprite.setTextColor(UI_FG, UI_BG);
+                menuCacheSprite.setTextDatum(top_center);
+                menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+                menuCacheSprite.setTextDatum(top_left);
+              }
+              else if (currentMenuTab == TAB_DOCUMENT)
+              {
+                menuCacheSprite.fillRoundRect(x + 10, y + 10, THUMB_W - 20, THUMB_H - 20, UI_RADIUS, UI_ACCENT);
+                int iconX = x + (THUMB_W - 96) / 2;
+                int iconY = y + (THUMB_H - 96) / 2;
+                menuCacheSprite.drawBitmap(iconX, iconY, book_material_icon, 96, 96, UI_FG);
+                
+                String title = bookFiles[cIdx];
+                if (title.length() > 22) title = title.substring(0, 20) + "...";
+
+                menuCacheSprite.setFont(&fonts::DejaVu12);
+                menuCacheSprite.setTextColor(UI_FG, UI_BG);
+                menuCacheSprite.setTextDatum(top_center);
+                menuCacheSprite.drawString(title, x + THUMB_W / 2, y + THUMB_H + 10);
+                menuCacheSprite.setTextDatum(top_left);
+              }
             }
           }
         }
@@ -922,6 +982,7 @@ void drawMenu()
 
   bool isDocTab = (currentMenuTab == TAB_DOCUMENT);
   String currentResumeName = isDocTab ? currentBookPath : lastMangaName;
+  if (currentMenuTab == TAB_APP) currentResumeName = ""; // Disable for App tab
   int currentResumePage = isDocTab ? currentTextPage : lastPage;
 
   if (menuCacheValid &&
@@ -1008,12 +1069,22 @@ void drawMenu()
         int col = relIdx % GRID_COLS;
         int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
         int y = GRID_Y_TOP + row * GRID_ROW_H;
-        M5.Display.drawRoundRect(x - 5, y - 5, THUMB_W + 10, THUMB_H + 10,
+
+        int selX = x, selY = y, selW = THUMB_W, selH = THUMB_H;
+        if (currentMenuTab == TAB_APP) {
+            selX = x + 10;
+            selY = y + 10;
+            selW = THUMB_W - 20;
+            selH = THUMB_W - 20;
+        }
+
+        M5.Display.drawRoundRect(selX - 5, selY - 5, selW + 10, selH + 10,
                                  UI_RADIUS + 2, TFT_BLACK);
-        M5.Display.drawRoundRect(x - 4, y - 4, THUMB_W + 8, THUMB_H + 8,
+        M5.Display.drawRoundRect(selX - 4, selY - 4, selW + 8, selH + 8,
                                  UI_RADIUS + 1, TFT_BLACK);
-        M5.Display.fillRect(x + (THUMB_W / 2) - 15, y + THUMB_H + 30, 30, 3,
-                            TFT_BLACK);
+        
+        int lineY = y + (currentMenuTab == TAB_APP ? THUMB_W : THUMB_H) + 30;
+        M5.Display.fillRect(x + (THUMB_W / 2) - 15, lineY, 30, 3, TFT_BLACK);
       }
     }
   }
@@ -1037,15 +1108,31 @@ void drawMenu()
       int col = relIdx % GRID_COLS;
       int x = GRID_GUTTER + col * (THUMB_W + GRID_GUTTER);
       int y = GRID_Y_TOP + row * GRID_ROW_H;
+      
+      int selX = x, selY = y, selW = THUMB_W, selH = THUMB_H;
+      if (currentMenuTab == TAB_APP) {
+          selX = x + 10;
+          selY = y + 10;
+          selW = THUMB_W - 20;
+          selH = THUMB_W - 20;
+      }
+
       M5.Display.setClipRect(x - 6, y - 6, THUMB_W + 12, THUMB_H + 40);
       menuCacheSprite.pushSprite(0, 0);
       M5.Display.clearClipRect();
-      M5.Display.drawRoundRect(x - 5, y - 5, THUMB_W + 10, THUMB_H + 10,
+      
+      M5.Display.drawRoundRect(selX - 5, selY - 5, selW + 10, selH + 10,
                                UI_RADIUS + 2, TFT_BLACK);
-      M5.Display.drawRoundRect(x - 4, y - 4, THUMB_W + 8, THUMB_H + 8,
+      M5.Display.drawRoundRect(selX - 4, selY - 4, selW + 8, selH + 8,
                                UI_RADIUS + 1, TFT_BLACK);
-      M5.Display.fillRect(x + (THUMB_W / 2) - 15, y + THUMB_H + 30, 30, 3,
-                          TFT_BLACK);
+      
+      if (currentMenuTab != TAB_APP) {
+        M5.Display.fillRect(x + (THUMB_W / 2) - 15, y + THUMB_H + 30, 30, 3,
+                            TFT_BLACK);
+      } else {
+        M5.Display.fillRect(x + (THUMB_W / 2) - 15, y + THUMB_W + 30, 30, 3,
+                            TFT_BLACK);
+      }
     }
   }
   prevMenuSelected = menuSelected;
@@ -1506,6 +1593,7 @@ void drawPage()
   M5.Display.setRotation(getActiveRotation());
   int screenW = M5.Display.width();
   int screenH = M5.Display.height();
+  bool isCurrentPageHuge = false;
 
   // 1. Instant turn logic: Check if requested page/strip is preloaded
   if (isNextPageReady && preloadedPage == currentPage &&
@@ -1554,6 +1642,19 @@ void drawPage()
         int imgW = jpeg.getWidth();
         int imgH = jpeg.getHeight();
         
+        // OPTIMIZATION: If current image is huge, free preloaded page to save memory
+        // and avoid OOM during current page processing.
+        if (imgW > screenW || imgH > screenH)
+        {
+          isCurrentPageHuge = true;
+          if (isNextPageReady)
+          {
+            Serial.println("Current page is huge, freeing preloaded page to save PSRAM.");
+            isNextPageReady = false;
+            nextPageSprite.deleteSprite();
+          }
+        }
+
         static LGFX_Sprite fullPageSprite(&M5.Display);
         prepareSprite(fullPageSprite, imgW, imgH, 16, true);
         
@@ -1694,8 +1795,9 @@ void drawPage()
     nextStrip = 0;
   }
 
-  if (nextPg < totalPages)
+  if (nextPg < totalPages && !isCurrentPageHuge)
   {
+    // Re-check screen size if we want to be safe, but preloadPage also checks.
     preloadPage(nextPg, nextStrip);
   }
 
@@ -2274,6 +2376,155 @@ void quickScreenRefresh() // Unused, leave here for future use
 {
   M5.Display.startWrite();
   M5.Display.clear(TFT_BLACK);
+  M5.Display.display();
+  M5.Display.endWrite();
+}
+
+void drawAlarm()
+{
+  forceFullMenuRedraw = true;
+  M5.Display.setRotation(0);
+  // Use 8-bit for cleaner E-ink contrast
+  prepareSprite(gSprite, DISPLAY_W, DISPLAY_H, 8, false); 
+  if (!gSprite.getBuffer()) return;
+
+  gSprite.fillScreen(TFT_WHITE);
+  
+  // Header Card (Solid Black)
+  gSprite.fillRoundRect(15, 15, DISPLAY_W - 30, 230, UI_RADIUS, TFT_BLACK);
+  gSprite.setTextColor(TFT_WHITE, TFT_BLACK);
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.setTextDatum(top_center);
+  gSprite.drawString("CURRENT TIME", DISPLAY_W / 2, 40);
+
+  auto dt = M5.Rtc.getDateTime();
+  char buf[64];
+  sprintf(buf, "%02d:%02d:%02d", dt.time.hours, dt.time.minutes, dt.time.seconds);
+  gSprite.setFont(&fonts::DejaVu40);
+  gSprite.setTextDatum(middle_center);
+  gSprite.drawString(buf, DISPLAY_W / 2, 125);
+  
+  sprintf(buf, "%02d-%02d-%04d", dt.date.date, dt.date.month, dt.date.year);
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.drawString(buf, DISPLAY_W / 2, 195);
+
+  // Set Alarm Section Card
+  int cardY = 270;
+  int cardH = 460;
+  // Thick border for better visibility
+  for (int i=0; i<3; i++) gSprite.drawRoundRect(15+i, cardY+i, DISPLAY_W - 30 - i*2, cardH - i*2, UI_RADIUS, TFT_BLACK);
+  
+  gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+  gSprite.setFont(&fonts::DejaVu24);
+  gSprite.setTextDatum(top_center);
+  gSprite.drawString("SET ALARM", DISPLAY_W / 2, cardY + 25);
+
+  // Validate time
+  struct tm alarmTm = {0};
+  alarmTm.tm_year = alarmConfig.year - 1900;
+  alarmTm.tm_mon = alarmConfig.month - 1;
+  alarmTm.tm_mday = alarmConfig.day;
+  alarmTm.tm_hour = alarmConfig.hour;
+  alarmTm.tm_min = alarmConfig.minute;
+  time_t alarmTime = mktime(&alarmTm);
+
+  struct tm nowTm = {0};
+  nowTm.tm_year = dt.date.year - 1900;
+  nowTm.tm_mon = dt.date.month - 1;
+  nowTm.tm_mday = dt.date.date;
+  nowTm.tm_hour = dt.time.hours;
+  nowTm.tm_min = dt.time.minutes;
+  nowTm.tm_sec = 0;
+  time_t nowTime = mktime(&nowTm);
+
+  bool isInvalid = (alarmTime <= nowTime);
+
+  // DD : HH : MM selectors
+  int xDD = 100;
+  int xHH = 270;
+  int xMM = 440;
+  int ySet = cardY + 240;
+  
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.setTextDatum(middle_center);
+  gSprite.drawString("DAY", xDD, ySet - 150);
+  gSprite.drawString("HOUR", xHH, ySet - 150);
+  gSprite.drawString("MIN", xMM, ySet - 150);
+
+  gSprite.setFont(&fonts::DejaVu40);
+  
+  // Day
+  sprintf(buf, "%02d", alarmConfig.day);
+  gSprite.drawString(buf, xDD, ySet);
+  gSprite.drawRoundRect(xDD - 48, ySet - 58, 96, 116, 5, TFT_BLACK);
+  gSprite.drawString("+", xDD, ySet - 105);
+  gSprite.drawString("-", xDD, ySet + 105);
+
+  gSprite.drawString(":", (xDD + xHH) / 2, ySet);
+
+  // Hour
+  sprintf(buf, "%02d", alarmConfig.hour);
+  gSprite.drawString(buf, xHH, ySet);
+  gSprite.drawRoundRect(xHH - 48, ySet - 58, 96, 116, 5, TFT_BLACK);
+  gSprite.drawString("+", xHH, ySet - 105);
+  gSprite.drawString("-", xHH, ySet + 105);
+  
+  gSprite.drawString(":", (xHH + xMM) / 2, ySet);
+  
+  // Minute
+  sprintf(buf, "%02d", alarmConfig.minute);
+  gSprite.drawString(buf, xMM, ySet);
+  gSprite.drawRoundRect(xMM - 48, ySet - 58, 96, 116, 5, TFT_BLACK);
+  gSprite.drawString("+", xMM, ySet - 105);
+  gSprite.drawString("-", xMM, ySet + 105);
+
+  // Set Alarm Button
+  int btnW = 420;
+  int btnH = 90;
+  int btnX = (DISPLAY_W - btnW) / 2;
+  int btnY = 810;
+  
+  // Time remaining message
+  if (!isInvalid) {
+    long diff = (long)(alarmTime - nowTime);
+    int days = diff / 86400;
+    int hours = (diff % 86400) / 3600;
+    int mins = (diff % 3600) / 60;
+    
+    char timeBuf[64];
+    if (days > 0) {
+      sprintf(timeBuf, "In %d days, %d hours, %d mins", days, hours, mins);
+    } else if (hours > 0) {
+      sprintf(timeBuf, "In %d hours, %d mins", hours, mins);
+    } else {
+      sprintf(timeBuf, "In %d mins", mins);
+    }
+    
+    gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+    gSprite.setFont(&fonts::DejaVu18);
+    gSprite.setTextDatum(middle_center);
+    gSprite.drawString(timeBuf, DISPLAY_W / 2, btnY - 35);
+  }
+
+  if (isInvalid) {
+    for(int i=0; i<3; i++) gSprite.drawRoundRect(btnX+i, btnY+i, btnW-i*2, btnH-i*2, UI_RADIUS, TFT_BLACK);
+    gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+    gSprite.setFont(&fonts::DejaVu24);
+    gSprite.setTextDatum(middle_center);
+    gSprite.drawString("INVALID TIME", btnX + btnW/2, btnY + btnH/2);
+  } else {
+    drawModernButton(gSprite, btnX, btnY, btnW, btnH, "SET ALARM", true);
+  }
+  
+  // Swipe Tip
+  gSprite.setTextColor(TFT_BLACK, TFT_WHITE);
+  gSprite.setFont(&fonts::DejaVu18);
+  gSprite.setTextDatum(bottom_center);
+  gSprite.drawString("Swipe up to go back", DISPLAY_W / 2, DISPLAY_H - 20);
+
+  M5.Display.startWrite();
+  gSprite.pushSprite(0, 0);
+  M5.Display.setEpdMode(epd_mode_t::epd_fast);
   M5.Display.display();
   M5.Display.endWrite();
 }

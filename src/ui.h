@@ -10,6 +10,7 @@ void drawBookmarks();
 void drawWifiServer();
 void drawPage();
 void drawTextPage();
+void drawAlarm();
 void openBook(int idx);
 void openBookPath(const String &path, int page);
 void preloadPage(int page, int strip);

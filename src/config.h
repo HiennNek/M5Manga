@@ -22,6 +22,7 @@
 #define DISPLAY_H 960
 #define LEFT_ZONE_W (DISPLAY_W / 2)
 #define SWIPE_UP_MIN 80
+#define BUZZER_PIN 21
 
 // Manga root
 #define MANGA_ROOT "/manga"
@@ -94,7 +95,8 @@ enum AppState
   STATE_READER,
   STATE_BOOKMARKS,
   STATE_WIFI,
-  STATE_TEXT_READER
+  STATE_TEXT_READER,
+  STATE_ALARM
 };
 
 enum OrientationMode

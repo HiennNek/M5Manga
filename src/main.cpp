@@ -18,6 +18,7 @@ void setup()
   cfg.internal_mic = false;
   cfg.internal_imu = true;
   cfg.clear_display = false; // Prevent automatic screen clear on boot
+  cfg.disable_rtc_irq = false; // Preserve RTC IRQ status so we can check it
   M5.begin(cfg);
 
   // Boost CPU for fast initialization
@@ -43,6 +44,69 @@ void setup()
   scanMangaFolders();
   scanBookFiles();
   loadBookmarks();
+
+  if (M5.Rtc.getIRQstatus())
+  {
+    Serial.println("Woke up from RTC Alarm!");
+    pinMode(BUZZER_PIN, OUTPUT);
+    
+    // Draw Alarm Trigger Screen
+    M5.Display.fillScreen(TFT_WHITE);
+    M5.Display.setTextColor(TFT_BLACK);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.setFont(&fonts::DejaVu40);
+    M5.Display.drawString("ALARM ACTIVE", DISPLAY_W / 2, DISPLAY_H / 2 - 40);
+    M5.Display.setFont(&fonts::DejaVu24);
+    M5.Display.drawString("Touch Screen to Stop", DISPLAY_W / 2, DISPLAY_H / 2 + 40);
+    M5.Display.display();
+
+    ledcAttach(BUZZER_PIN, 2700, 8);
+
+    bool stopAlarm = false;
+    while (!stopAlarm)
+    {
+      // 4 Fast Beeps
+      for (int i = 0; i < 4; i++)
+      {
+        ledcWrite(BUZZER_PIN, 128);
+        // Check touch during 100ms beep
+        uint32_t start = millis();
+        while (millis() - start < 50) {
+          M5.update();
+          if (M5.Touch.getCount() > 0) { stopAlarm = true; break; }
+          delay(5);
+        }
+        if (stopAlarm) break;
+
+        ledcWrite(BUZZER_PIN, 0);
+        // Check touch during 50ms silence
+        start = millis();
+        while (millis() - start < 50) {
+          M5.update();
+          if (M5.Touch.getCount() > 0) { stopAlarm = true; break; }
+          delay(5);
+        }
+        if (stopAlarm) break;
+      }
+
+      if (stopAlarm) break;
+
+      // 4 "Rests" (400ms silence)
+      uint32_t start = millis();
+      while (millis() - start < 400) {
+        M5.update();
+        if (M5.Touch.getCount() > 0) { stopAlarm = true; break; }
+        delay(10);
+      }
+    }
+    
+    ledcWrite(BUZZER_PIN, 0);
+    ledcDetach(BUZZER_PIN);
+    M5.Rtc.clearIRQ();
+    
+    // Refresh to main menu after stopping
+    requestRedraw();
+  }
 
   // Auto-resume last read book (Kindle-like behavior)
   if (isLastReadManga && lastMangaPath.length() > 0)
@@ -89,7 +153,9 @@ void loop()
   {
     setCpuFrequencyMhz(240);
     M5.Display.setEpdMode(currentEpdMode);
-    if (controlMenuOpen)
+    if (appState == STATE_ALARM)
+      drawAlarm();
+    else if (controlMenuOpen)
       drawControlCenter();
     else if (bookConfigOpen)
       drawBookConfig();

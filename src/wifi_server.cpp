@@ -19,26 +19,80 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>M5Manga File Browser</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background: #f0f0f0; }
-        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h2 { border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .controls { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background: #eee; }
-        tr:hover { background: #f9f9f9; }
-        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; color: white; text-decoration: none; font-size: 14px; }
-        .btn-blue { background: #007bff; }
-        .btn-red { background: #dc3545; }
-        .btn-green { background: #28a745; }
-        .btn-grey { background: #6c757d; }
-        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: white; color: black; line-height: 1.6; }
+        .container { 
+            max-width: 1000px; 
+            margin: 40px auto; 
+            padding: 30px; 
+            border: 3px solid black; 
+            border-radius: 12px; 
+            box-shadow: 8px 8px 0px 0px black;
+        }
+        h2 { font-size: 28px; text-transform: uppercase; letter-spacing: 2px; border-bottom: 3px solid black; padding-bottom: 15px; margin-top: 0; }
+        .path { font-family: monospace; font-size: 16px; margin: 20px 0; padding: 8px 15px; background: #000; color: #fff; border-radius: 6px; display: inline-block; }
+        .controls { margin-bottom: 30px; display: flex; gap: 15px; flex-wrap: wrap; }
+        .btn { 
+            padding: 12px 24px; 
+            border: 2px solid black; 
+            border-radius: 8px;
+            background: white; 
+            color: black; 
+            cursor: pointer; 
+            font-weight: bold; 
+            text-transform: uppercase; 
+            font-size: 13px;
+            transition: transform 0.1s;
+            box-shadow: 4px 4px 0px 0px black;
+        }
+        .btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0px 0px black; }
+        .btn:active { transform: translate(2px, 2px); box-shadow: 0px 0px 0px 0px black; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; transform: none; }
+        
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 20px; border: 2px solid black; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 15px; text-align: left; border-bottom: 2px solid black; }
+        th { background: black; color: white; text-transform: uppercase; font-size: 14px; }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        tr:hover { background: #eee; }
+        
         input[type="file"] { display: none; }
-        .path { font-weight: bold; color: #555; margin-bottom: 10px; }
-        .checkbox-col { width: 40px; }
-        #status { margin-top: 10px; padding: 10px; border-radius: 4px; display: none; }
-        .progress { width: 100%; background: #eee; border-radius: 4px; margin-top: 10px; display: none; }
-        .progress-bar { width: 0%; height: 20px; background: #28a745; border-radius: 4px; text-align: center; color: white; line-height: 20px; font-size: 12px; }
+        .checkbox-col { width: 50px; text-align: center; }
+        input[type="checkbox"] { transform: scale(1.5); cursor: pointer; accent-color: black; }
+        
+        #status { 
+            margin-top: 20px; 
+            padding: 15px; 
+            border: 2px solid black; 
+            border-radius: 8px;
+            font-weight: bold; 
+            display: none; 
+            text-transform: uppercase;
+            box-shadow: 4px 4px 0px 0px black;
+        }
+        .progress { 
+            width: 100%; 
+            border: 2px solid black; 
+            border-radius: 8px;
+            height: 35px; 
+            margin-top: 20px; 
+            display: none; 
+            overflow: hidden;
+            background: white;
+        }
+        .progress-bar { 
+            width: 0%; 
+            height: 100%; 
+            background: black; 
+            color: white; 
+            text-align: center; 
+            line-height: 31px; 
+            font-size: 14px; 
+            font-weight: bold;
+            transition: width 0.3s ease;
+        }
+        a { color: black; text-decoration: none; font-weight: bold; border-bottom: 2px solid transparent; }
+        a:hover { border-bottom: 2px solid black; }
     </style>
 </head>
 <body>
@@ -46,11 +100,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <h2>M5Manga File Browser</h2>
         <div class="path" id="currentPath">/</div>
         <div class="controls">
-            <button class="btn btn-blue" onclick="document.getElementById('fileInput').click()">Upload Files</button>
-            <button class="btn btn-blue" onclick="document.getElementById('folderInput').click()">Upload Folder</button>
+            <button class="btn" onclick="document.getElementById('fileInput').click()">Upload Files</button>
+            <button class="btn" onclick="document.getElementById('folderInput').click()">Upload Folder</button>
             <button class="btn btn-red" id="btnDeleteSelected" onclick="deleteSelected()" disabled>Delete Selected</button>
-            <button class="btn btn-green" onclick="syncTime()">Sync Time</button>
-            <button class="btn btn-grey" onclick="goBack()">Back</button>
+            <button class="btn" onclick="syncTime()">Sync Time</button>
+            <button class="btn" onclick="goBack()">Back</button>
             <input type="file" id="fileInput" multiple onchange="uploadFiles(this.files)">
             <input type="file" id="folderInput" webkitdirectory mozdirectory msdirectory odirectory directory onchange="uploadFiles(this.files)">
         </div>
@@ -84,22 +138,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 document.getElementById('selectAll').checked = false;
                 updateDeleteButton();
 
+                files.sort((a,b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === "dir" ? -1 : 1));
+
                 files.forEach(file => {
                     const tr = document.createElement('tr');
                     const isDir = file.type === "dir";
                     tr.innerHTML = `
                         <td class="checkbox-col"><input type="checkbox" class="file-check" data-path="${file.name}" onchange="updateDeleteButton()"></td>
-                        <td>${isDir ? '📁' : '📄'} <a href="#" onclick="${isDir ? `changeDir('${file.name}')` : `downloadFile('${file.name}')`}">${file.name}</a></td>
+                        <td>${isDir ? '<b>[DIR]</b>' : '[FILE]'} <a href="#" onclick="${isDir ? `changeDir('${file.name}')` : `downloadFile('${file.name}')`}">${file.name}</a></td>
                         <td>${isDir ? '-' : formatBytes(file.size)}</td>
                         <td>
+                            <button class="btn" onclick="renameFile('${file.name}')">Rename</button>
                             <button class="btn btn-red" onclick="deleteFile('${file.name}')">Delete</button>
-                            <button class="btn btn-blue" onclick="renameFile('${file.name}')">Rename</button>
                         </td>
                     `;
                     list.appendChild(tr);
                 });
             } catch (e) {
-                showStatus("Error loading files", "red");
+                showStatus("Error: Could not load file list", "black");
             }
         }
 
@@ -150,7 +206,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         }
 
         async function performDelete(paths) {
-            showStatus("Deleting...", "blue");
+            showStatus("Action: Deleting...", "black");
             try {
                 const response = await fetch('/delete', {
                     method: 'POST',
@@ -158,12 +214,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     body: JSON.stringify({ paths })
                 });
                 if (response.ok) {
-                    showStatus("Deleted successfully", "green");
+                    showStatus("Status: Deleted successfully", "black");
                     loadFiles();
                 } else {
-                    showStatus("Delete failed", "red");
+                    showStatus("Error: Delete failed", "black");
                 }
-            } catch (e) { showStatus("Error during delete", "red"); }
+            } catch (e) { showStatus("Error: Communication failure during delete", "black"); }
         }
 
         function renameFile(name) {
@@ -185,14 +241,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const progressBar = document.getElementById('progressBar');
             const progressContainer = document.querySelector('.progress');
             progressContainer.style.display = 'block';
-            showStatus(`Uploading ${files.length} files...`, "blue");
+            showStatus(`Action: Uploading ${files.length} items...`, "black");
 
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 const relativePath = file.webkitRelativePath || file.name;
                 const fullPath = (currentDir === "/" ? "" : currentDir) + "/" + relativePath;
                 
-                progressBar.innerText = `Uploading ${i+1}/${files.length}: ${file.name}`;
+                progressBar.innerText = `[${Math.round(((i + 1) / files.length) * 100)}%] UPLOADING: ${file.name}`;
                 const formData = new FormData();
                 formData.append('file', file, fullPath);
 
@@ -206,12 +262,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     const percent = Math.round(((i + 1) / files.length) * 100);
                     progressBar.style.width = percent + "%";
                 } catch (e) {
-                    showStatus(`Error uploading ${file.name}`, "red");
+                    showStatus(`Error: Failed at ${file.name}`, "black");
                     break;
                 }
             }
             
-            showStatus("Upload complete", "green");
+            showStatus("Status: Upload complete", "black");
             setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
             loadFiles();
         }
@@ -220,8 +276,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const s = document.getElementById('status');
             s.innerText = msg;
             s.style.display = 'block';
-            s.style.background = color === "red" ? "#f8d7da" : (color === "green" ? "#d4edda" : "#d1ecf1");
-            s.style.color = color === "red" ? "#721c24" : (color === "green" ? "#155724" : "#0c5460");
+            s.style.background = "black";
+            s.style.color = "white";
         }
 
         async function syncTime() {
@@ -234,7 +290,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 minutes: now.getMinutes(),
                 seconds: now.getSeconds()
             };
-            showStatus("Syncing time...", "blue");
+            showStatus("Action: Syncing time...", "black");
             try {
                 const response = await fetch('/sync_time', {
                     method: 'POST',
@@ -242,11 +298,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     body: JSON.stringify(payload)
                 });
                 if (response.ok) {
-                    showStatus("Time synced successfully", "green");
+                    showStatus("Status: Time synchronized", "black");
                 } else {
-                    showStatus("Sync failed", "red");
+                    showStatus("Error: Sync failed", "black");
                 }
-            } catch (e) { showStatus("Error during sync", "red"); }
+            } catch (e) { showStatus("Error: Sync communication failure", "black"); }
         }
 
         loadFiles();

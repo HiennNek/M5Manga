@@ -6,21 +6,32 @@
 #include <Preferences.h>
 #include <vector>
 
+struct AlarmConfig
+{
+  int hour;
+  int minute;
+  int day;
+  int month;
+  int year;
+  bool active;
+};
+extern AlarmConfig alarmConfig;
+
 struct Bookmark
 {
   String folder;
   int page;
 };
 
-enum MenuTab { TAB_COMIC, TAB_DOCUMENT };
+enum MenuTab { TAB_COMIC, TAB_DOCUMENT, TAB_APP };
 extern MenuTab currentMenuTab;
 
 extern AppState appState;
 extern std::vector<String> mangaFolders;
 extern std::vector<int> mangaPageCounts;
 extern std::vector<String> bookFiles;
-extern int menuSelected;
-extern int menuScroll;
+extern int menuSelecteds[3];
+extern int menuScrolls[3];
 extern int bookmarkScroll;
 
 extern String currentMangaPath;
@@ -54,9 +65,9 @@ extern Preferences prefs;
 
 extern LGFX_Sprite gSprite;
 extern LGFX_Sprite nextPageSprite;
-extern LGFX_Sprite menuCacheSprite;
-extern int lastDrawnMenuScroll;
-extern bool menuCacheValid;
+extern LGFX_Sprite menuCacheSprites[3];
+extern int lastDrawnMenuScrolls[3];
+extern bool menuCacheValids[3];
 extern String lastMangaPath;
 extern int lastPage;
 extern String lastMangaName;

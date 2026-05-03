@@ -24,9 +24,9 @@ static void flashButton(int x, int y, int w, int h, int radius = UI_RADIUS,
 // Navigate the main menu to a new scroll position
 static void menuNavigate(int newScroll)
 {
-  menuScroll = newScroll;
-  menuSelected = menuScroll;
-  menuCacheValid = false;
+  menuScrolls[currentMenuTab] = newScroll;
+  menuSelecteds[currentMenuTab] = menuScrolls[currentMenuTab];
+  menuCacheValids[currentMenuTab] = false;
   requestRedraw();
 }
 
@@ -64,7 +64,7 @@ void handleTouch()
   // If a menu is open, we MUST ensure the touch coordinate system matches the menu drawing (Portrait/0)
   if (controlMenuOpen || bookConfigOpen || appState == STATE_MENU || 
       appState == STATE_BOOKMARKS || appState == STATE_WIFI || 
-      appState == STATE_TEXT_READER)
+      appState == STATE_TEXT_READER || appState == STATE_ALARM)
   {
     M5.Display.setRotation(0);
   }
@@ -88,6 +88,8 @@ void handleTouch()
     handleBookmarksTouch(t);
   else if (appState == STATE_WIFI)
     handleWifiTouch(t);
+  else if (appState == STATE_ALARM)
+    handleAlarmTouch(t);
   else if (appState == STATE_TEXT_READER)
     handleTextTouch(t);
   else
@@ -228,7 +230,7 @@ void handleBookmarksTouch(const m5::touch_detail_t &t)
         if (tapX > M5.Display.width() - 120)
         {
           // Delete button
-          flashButton(M5.Display.width() - 100, yOff + 20, 70, 40);
+          flashButton(M5.Display.width() - 100, yOff + 20, 70, 40, UI_RADIUS, UI_BG);
           deleteBookmark(i);
           bool remains = false;
           for (const auto &b : bookmarks)
@@ -303,7 +305,7 @@ void handleWifiTouch(const m5::touch_detail_t &t)
 
     stopWifiServer();
     appState = STATE_MENU;
-    menuCacheValid = false;
+    // Dont clear cache here as we return to library
     requestRedraw();
   }
 }
@@ -390,23 +392,25 @@ void handleMenuTouch(const m5::touch_detail_t &t)
   int totalItems;
   if (currentMenuTab == TAB_COMIC)
     totalItems = (int)mangaFolders.size() + 1;
-  else
+  else if (currentMenuTab == TAB_DOCUMENT)
     totalItems = (int)bookFiles.size() + 1;
+  else // TAB_APP
+    totalItems = 1;
 
   // Tab switching (top 80px)
   if (t.y < 80)
   {
     MenuTab oldTab = currentMenuTab;
-    if (t.x < DISPLAY_W / 2)
+    if (t.x < DISPLAY_W / 3)
       currentMenuTab = TAB_COMIC;
-    else
+    else if (t.x < (DISPLAY_W * 2) / 3)
       currentMenuTab = TAB_DOCUMENT;
+    else
+      currentMenuTab = TAB_APP;
 
     if (oldTab != currentMenuTab)
     {
-      menuScroll = 0;
-      menuSelected = -1;
-      menuCacheValid = false;
+      // Dont reset scroll/selection/cache here to preserve preview
       requestRedraw();
     }
     return;
@@ -415,9 +419,9 @@ void handleMenuTouch(const m5::touch_detail_t &t)
   // Horizontal Swipe Right or Vertical Swipe Down → Next Page
   if (dx > SWIPE_HORIZ_MIN || dy > SWIPE_UP_MIN)
   {
-    if (menuScroll + MENU_VISIBLE < totalItems)
+    if (menuScrolls[currentMenuTab] + MENU_VISIBLE < totalItems)
     {
-      menuNavigate(menuScroll + MENU_VISIBLE);
+      menuNavigate(menuScrolls[currentMenuTab] + MENU_VISIBLE);
     }
     else if (dx > SWIPE_HORIZ_MIN)
     {
@@ -429,9 +433,9 @@ void handleMenuTouch(const m5::touch_detail_t &t)
   // Horizontal Swipe Left → Previous Page
   if (dx < -SWIPE_HORIZ_MIN)
   {
-    if (menuScroll > 0)
+    if (menuScrolls[currentMenuTab] > 0)
     {
-      menuNavigate(std::max(0, menuScroll - MENU_VISIBLE));
+      menuNavigate(std::max(0, menuScrolls[currentMenuTab] - MENU_VISIBLE));
     }
     else
     {
@@ -503,13 +507,13 @@ void handleMenuTouch(const m5::touch_detail_t &t)
   if (row >= GRID_ROWS)
     row = GRID_ROWS - 1;
 
-  int idx = menuScroll + (row * GRID_COLS + col);
+  int idx = menuScrolls[currentMenuTab] + (row * GRID_COLS + col);
   if (idx >= totalItems)
     return;
 
-  if (idx == menuSelected)
+  if (idx == menuSelecteds[currentMenuTab])
   {
-    if (idx == 0)
+    if (idx == 0 && currentMenuTab != TAB_APP)
     {
       appState = STATE_BOOKMARKS;
       selectedBookmarkFolder = "";
@@ -520,13 +524,26 @@ void handleMenuTouch(const m5::touch_detail_t &t)
     {
       if (currentMenuTab == TAB_COMIC)
         openManga(idx - 1);
-      else
+      else if (currentMenuTab == TAB_DOCUMENT)
         openBook(idx - 1);
+      else // TAB_APP
+      {
+        if (idx == 0) { // Alarm
+           auto dt = M5.Rtc.getDateTime();
+           alarmConfig.hour = dt.time.hours;
+           alarmConfig.minute = dt.time.minutes;
+           alarmConfig.day = dt.date.date;
+           alarmConfig.month = dt.date.month;
+           alarmConfig.year = dt.date.year;
+           appState = STATE_ALARM;
+           requestRedraw();
+        }
+      }
     }
   }
   else
   {
-    menuSelected = idx;
+    menuSelecteds[currentMenuTab] = idx;
     requestRedraw();
   }
 }
@@ -930,7 +947,7 @@ void handleTextTouch(const m5::touch_detail_t &t)
   {
     appState = STATE_MENU;
     currentMenuTab = TAB_DOCUMENT;
-    menuScroll = 0;
+    menuScrolls[currentMenuTab] = 0;
     requestRedraw();
     return;
   }
@@ -966,6 +983,115 @@ void handleTextTouch(const m5::touch_detail_t &t)
       requestRedraw(epd_mode_t::epd_text);
       saveProgress();
     }
+  }
+}
+
+void handleAlarmTouch(const m5::touch_detail_t &t)
+{
+  if (!t.wasReleased()) return;
+  
+  int tx = t.x;
+  int ty = t.y;
+  int dy = t.distanceY();
+  
+  // Swipe up to go back
+  if (dy < -SWIPE_UP_MIN) {
+      appState = STATE_MENU;
+      menuCacheValids[currentMenuTab] = false;
+      requestRedraw();
+      return;
+  }
+  
+  // Back button (header region)
+  if (ty < 100) {
+      appState = STATE_MENU;
+      menuCacheValids[currentMenuTab] = false;
+      requestRedraw();
+      return;
+  }
+  
+  int xDD = 100;
+  int xHH = 270;
+  int xMM = 440;
+  int ySet = 270 + 240; // cardY + 240 = 510
+  
+  // DD +/-
+  if (tx > xDD - 50 && tx < xDD + 50) {
+      if (ty < ySet - 60) { 
+          alarmConfig.day++; 
+          if (alarmConfig.day > 31) alarmConfig.day = 1; 
+          requestRedraw(); 
+      }
+      else if (ty > ySet + 60 && ty < ySet + 200) { 
+          alarmConfig.day--; 
+          if (alarmConfig.day < 1) alarmConfig.day = 31; 
+          requestRedraw(); 
+      }
+  }
+
+  // HH +/-
+  if (tx > xHH - 50 && tx < xHH + 50) {
+      if (ty < ySet - 60) { alarmConfig.hour = (alarmConfig.hour + 1) % 24; requestRedraw(); }
+      else if (ty > ySet + 60 && ty < ySet + 200) { alarmConfig.hour = (alarmConfig.hour + 23) % 24; requestRedraw(); }
+  }
+  
+  // MM +/-
+  if (tx > xMM - 50 && tx < xMM + 50) {
+      if (ty < ySet - 60) { alarmConfig.minute = (alarmConfig.minute + 1) % 60; requestRedraw(); }
+      else if (ty > ySet + 60 && ty < ySet + 200) { alarmConfig.minute = (alarmConfig.minute + 59) % 60; requestRedraw(); }
+  }
+  
+  // Set Alarm Button
+  int btnW = 420;
+  int btnH = 90;
+  int btnX = (DISPLAY_W - btnW) / 2;
+  int btnY = 810;
+  
+  if (tx >= btnX && tx <= btnX + btnW && ty >= btnY && ty <= btnY + btnH) {
+      // Validate time before setting
+      auto now = M5.Rtc.getDateTime();
+      struct tm alarmTm = {0};
+      alarmTm.tm_year = alarmConfig.year - 1900;
+      alarmTm.tm_mon = alarmConfig.month - 1;
+      alarmTm.tm_mday = alarmConfig.day;
+      alarmTm.tm_hour = alarmConfig.hour;
+      alarmTm.tm_min = alarmConfig.minute;
+      alarmTm.tm_sec = 0;
+      time_t alarmTime = mktime(&alarmTm);
+
+      struct tm nowTm = {0};
+      nowTm.tm_year = now.date.year - 1900;
+      nowTm.tm_mon = now.date.month - 1;
+      nowTm.tm_mday = now.date.date;
+      nowTm.tm_hour = now.time.hours;
+      nowTm.tm_min = now.time.minutes;
+      nowTm.tm_sec = 0;
+      time_t nowTime = mktime(&nowTm);
+
+      if (alarmTime <= nowTime) {
+          // Visual feedback for invalid action: thick border
+          for (int i = 0; i < 5; i++) {
+              M5.Display.drawRoundRect(btnX + i, btnY + i, btnW - i * 2, btnH - i * 2, UI_RADIUS, UI_FG);
+          }
+          delay(150);
+          requestRedraw();
+          return;
+      }
+
+      flashButton(btnX, btnY, btnW, btnH, UI_RADIUS, UI_BG);
+      
+      m5::rtc_datetime_t alarmDt;
+      alarmDt.date.year = alarmConfig.year;
+      alarmDt.date.month = alarmConfig.month;
+      alarmDt.date.date = alarmConfig.day;
+      alarmDt.time.hours = alarmConfig.hour;
+      alarmDt.time.minutes = alarmConfig.minute;
+      alarmDt.time.seconds = 0;
+      
+      M5.Rtc.setAlarmIRQ(alarmDt.date, alarmDt.time);
+      
+      // Shutdown/Sleep with screen saver
+      systemShutdown(); 
   }
 }
 
